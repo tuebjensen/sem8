@@ -1,4 +1,4 @@
-from math import floor
+import sys
 import math
 from typing import Any, override
 import gymnasium as gym
@@ -19,9 +19,9 @@ class Sem8Env(gym.Env):
         self._agent_angle = 0.0
         self._agent_speed = 5
         self._agent_turn_speed = 10
-        self._agent_radius = 30
+        self._agent_radius = 120
 
-        self._target_radius = 30
+        self._target_radius = 120
 
         self.action_space = spaces.Discrete(2)  # Forward, Left, Right
         self.observation_space = spaces.Tuple(
@@ -177,6 +177,10 @@ class Sem8Env(gym.Env):
         if self.render_mode == "human":
             assert self.window is not None
             assert self.clock is not None
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
             self.window.blit(render_surface, render_surface.get_rect())
             pygame.event.pump()
             pygame.display.update()
