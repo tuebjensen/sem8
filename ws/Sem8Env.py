@@ -7,7 +7,7 @@ import pygame
 
 
 class Sem8Env(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 0.5}
 
     def __init__(self, render_mode=None, **kwargs) -> None:
         super().__init__()
@@ -65,18 +65,17 @@ class Sem8Env(gym.Env):
         y_mask = np.ones(self._height, dtype=np.int8)
         angle_mask = np.ones(360, dtype=np.int8)
         x_mask[0 : self._agent_radius + 1] = 0
-        x_mask[self._agent_radius :] = 0
+        x_mask[self._width - self._agent_radius :] = 0
         y_mask[0 : self._agent_radius + 1] = 0
-        y_mask[self._agent_radius :] = 0
+        y_mask[self._height - self._agent_radius :] = 0
         agent_init = self.observation_space.sample(mask=(x_mask, y_mask, angle_mask))
         self._agent_position[0], self._agent_position[1], self._agent_angle = agent_init
-
         x_mask = np.ones(self._width, dtype=np.int8)
         y_mask = np.ones(self._height, dtype=np.int8)
         x_mask[0 : self._target_radius + 1] = 0
-        x_mask[self._target_radius :] = 0
+        x_mask[self._width - self._target_radius :] = 0
         y_mask[0 : self._target_radius + 1] = 0
-        y_mask[self._target_radius :] = 0
+        y_mask[self._height - self._target_radius :] = 0
         target_init = self.observation_space.sample(mask=(x_mask, y_mask, angle_mask))
         self._target_position = np.array([target_init[0], target_init[1]])
 
