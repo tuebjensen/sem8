@@ -128,7 +128,7 @@ class Sem8Env(gym.Env):
     @override
     def render(self):
         if self.render_mode == "rgb_array":
-            self._render_frame()
+            return self._render_frame()
 
     def _render_frame(self):
         if self.window is None and self.render_mode == "human":
