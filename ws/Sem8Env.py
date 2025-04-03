@@ -8,7 +8,7 @@ import pygame
 
 
 class Sem8Env(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 0.5}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
     def __init__(self, render_mode=None, **kwargs) -> None:
         super().__init__()
@@ -138,7 +138,9 @@ class Sem8Env(gym.Env):
         if self.clock == None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
 
-        render_surface = self._image.copy()
+        render_surface = pygame.Surface((self._width, self._height))
+        render_surface.blit(self._image, (0, 0))
+
         pygame.draw.circle(
             render_surface,
             (0, 255, 0),
@@ -150,6 +152,16 @@ class Sem8Env(gym.Env):
             (0, 0, 255),
             self._target_position.tolist(),
             self._target_radius,
+        )
+        pygame.draw.line(
+            render_surface,
+            (255, 0, 0),
+            self._agent_position.tolist(),
+            (
+                self._agent_position[0] + 50 * np.cos(np.radians(self._agent_angle)),
+                self._agent_position[1] + 50 * np.sin(np.radians(self._agent_angle)),
+            ),
+            4,
         )
 
         if self.render_mode == "human":
