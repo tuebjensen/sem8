@@ -1,6 +1,14 @@
 import gymnasium as gym
 import Sem8Env as _
 from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(message)s",
+    level=logging.INFO,
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 env = gym.make("Sem8-v0", render_mode="rgb_array")
 observation, info = env.reset()
@@ -18,7 +26,6 @@ env = RecordVideo(
 env = RecordEpisodeStatistics(env)
 
 for i in range(episode_count):
-    print(f"Episode {i + 1} of {episode_count}")
     observation, info = env.reset()
 
     episode_over = False
@@ -29,5 +36,8 @@ for i in range(episode_count):
         observation, reward, terminated, truncated, info = env.step(action)
 
         episode_over = terminated or truncated
+
+    info["episode"]["i"] = i
+    logger.info(info["episode"])
 
 env.close()
