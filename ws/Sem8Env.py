@@ -190,10 +190,10 @@ class Sem8Env(gym.Env):
                 np.array(pygame.surfarray.pixels3d(render_surface)), axes=(1, 0, 2)
             )
 
-        def close(self):
-            if self.window is not None:
-                pygame.display.quit()
-                pygame.quit()
+    def close(self):
+        if self.window is not None:
+            pygame.display.quit()
+            pygame.quit()
 
 
 gym.register(id="Sem8-v0", entry_point=Sem8Env)
