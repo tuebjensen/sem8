@@ -52,18 +52,25 @@ class Sem8Env(gym.Env):
             "image": self._image,
         }
 
-    def _load_random_image(self):
+    def _load_random_image_with_bbox(self):
         image_object = random.choice(self._annotation_dict["images"])
         image_file_name = image_object["file_name"]
         image_dir = "images"
         image_path = os.path.join(image_dir, image_file_name)
         image = pygame.image.load(image_path)
-        return image
+        image_id = image_object["id"]
+        annotations = self._annotation_dict["annotations"]
+        bboxes = []
+        for annotation in annotations:
+            if annotation["image_id"] == image_id:
+                bbox = annotation["bbox"]
+                bboxes.append(bbox)
+        return image, bboxes
 
     @override
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
-        self._image = self._load_random_image()
+        self._image, self._bboxes = self._load_random_image_with_bbox()
         self._width, self._height = self._image.get_width(), self._image.get_height()
         self.observation_space = spaces.Tuple(
             (
@@ -177,10 +184,20 @@ class Sem8Env(gym.Env):
         if self.render_mode == "human":
             assert self.window is not None
             assert self.clock is not None
+            for bbox in self._bboxes:
+                x, y, w, h = bbox
+                pygame.draw.rect(
+                    render_surface,
+                    (255, 0, 0),
+                    (x, y, w, h),
+                    3,
+                )
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
+            # Draw image bounding boxes
+
             self.window.blit(render_surface, render_surface.get_rect())
             pygame.event.pump()
             pygame.display.update()
@@ -190,10 +207,10 @@ class Sem8Env(gym.Env):
                 np.array(pygame.surfarray.pixels3d(render_surface)), axes=(1, 0, 2)
             )
 
-        def close(self):
-            if self.window is not None:
-                pygame.display.quit()
-                pygame.quit()
+    def close(self):
+        if self.window is not None:
+            pygame.display.quit()
+            pygame.quit()
 
 
 gym.register(id="Sem8-v0", entry_point=Sem8Env)
