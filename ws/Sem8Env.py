@@ -1,8 +1,9 @@
+from math import floor
+import math
 from typing import Any, override
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from PIL import Image
 import pygame
 
 
@@ -35,9 +36,9 @@ class Sem8Env(gym.Env):
 
     def _get_obs(self):
         return (
-            self._agent_position[0],
-            self._agent_position[1],
-            self._agent_angle,
+            math.floor(self._agent_position[0]),
+            math.floor(self._agent_position[1]),
+            math.floor(self._agent_angle),
         )
 
     def _get_info(self):
