@@ -5,6 +5,9 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 import pygame
+import json
+import os
+import random
 
 
 class Sem8Env(gym.Env):
@@ -34,6 +37,9 @@ class Sem8Env(gym.Env):
         self.window = None
         self.clock = None
 
+        with open("images/instances_default.json") as f:
+            self._annotation_dict = json.load(f)
+
     def _get_obs(self):
         return (
             math.floor(self._agent_position[0]),
@@ -46,15 +52,19 @@ class Sem8Env(gym.Env):
             "image": self._image,
         }
 
+    def _load_random_image(self):
+        image_object = random.choice(self._annotation_dict["images"])
+        image_file_name = image_object["file_name"]
+        image_dir = "images"
+        image_path = os.path.join(image_dir, image_file_name)
+        image = pygame.image.load(image_path)
+        return image
+
     @override
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
-        image_path = "images/background.png"
-        self._image = pygame.image.load(image_path)
+        self._image = self._load_random_image()
         self._width, self._height = self._image.get_width(), self._image.get_height()
-        # im_frame = Image.open(image_path)
-        # self._image = np.array(im_frame.getdata())
-        # self._width, self._height = self._image.shape
         self.observation_space = spaces.Tuple(
             (
                 spaces.Discrete(self._width),  # x coordinate
