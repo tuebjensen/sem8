@@ -1,10 +1,13 @@
-from math import floor
+import sys
 import math
 from typing import Any, override
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 import pygame
+import json
+import os
+import random
 
 
 class Sem8Env(gym.Env):
@@ -16,9 +19,9 @@ class Sem8Env(gym.Env):
         self._agent_angle = 0.0
         self._agent_speed = 5
         self._agent_turn_speed = 10
-        self._agent_radius = 30
+        self._agent_radius = 120
 
-        self._target_radius = 30
+        self._target_radius = 120
 
         self.action_space = spaces.Discrete(2)  # Forward, Left, Right
         self.observation_space = spaces.Tuple(
@@ -34,6 +37,9 @@ class Sem8Env(gym.Env):
         self.window = None
         self.clock = None
 
+        with open("images/instances_default.json") as f:
+            self._annotation_dict = json.load(f)
+
     def _get_obs(self):
         return (
             math.floor(self._agent_position[0]),
@@ -46,15 +52,19 @@ class Sem8Env(gym.Env):
             "image": self._image,
         }
 
+    def _load_random_image(self):
+        image_object = random.choice(self._annotation_dict["images"])
+        image_file_name = image_object["file_name"]
+        image_dir = "images"
+        image_path = os.path.join(image_dir, image_file_name)
+        image = pygame.image.load(image_path)
+        return image
+
     @override
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
-        image_path = "images/background.png"
-        self._image = pygame.image.load(image_path)
+        self._image = self._load_random_image()
         self._width, self._height = self._image.get_width(), self._image.get_height()
-        # im_frame = Image.open(image_path)
-        # self._image = np.array(im_frame.getdata())
-        # self._width, self._height = self._image.shape
         self.observation_space = spaces.Tuple(
             (
                 spaces.Discrete(self._width),  # x coordinate
@@ -167,6 +177,10 @@ class Sem8Env(gym.Env):
         if self.render_mode == "human":
             assert self.window is not None
             assert self.clock is not None
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
             self.window.blit(render_surface, render_surface.get_rect())
             pygame.event.pump()
             pygame.display.update()
