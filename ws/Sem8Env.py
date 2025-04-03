@@ -15,12 +15,12 @@ class Sem8Env(gym.Env):
         self._agent_position = np.array([-1, -1], dtype=np.float32)
         self._agent_angle = 0.0
         self._agent_speed = 5
-        self._agent_turn_speed = 0.5
+        self._agent_turn_speed = 10
         self._agent_radius = 30
 
         self._target_radius = 30
 
-        self.action_space = spaces.Discrete(3)  # Forward, Left, Right
+        self.action_space = spaces.Discrete(2)  # Forward, Left, Right
         self.observation_space = spaces.Tuple(
             (
                 spaces.Discrete(1),  # x coordinate
