@@ -1,0 +1,8 @@
+{
+    "basedpyright.analysis.typeCheckingMode": "standard",
+    "editor.inlayHints.enabled": "offUnlessPressed",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    },
+} 
