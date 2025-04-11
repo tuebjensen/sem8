@@ -11,6 +11,12 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+is_ipython = "inline" in matplotlib.get_backend()
+if is_ipython:
+    from IPython import display
+
+plt.ion()
+
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
@@ -173,7 +179,12 @@ def plot_durations(episode_durations, show_result=False):
         plt.plot(means.numpy())
 
     plt.pause(0.001)  # pause a bit so that plots are updated
-    plt.show()
+    if is_ipython:
+        if not show_result:
+            display.display(plt.gcf())
+            display.clear_output(wait=True)
+        else:
+            display.display(plt.gcf())
 
 
 def main():
@@ -183,9 +194,9 @@ def main():
     dqn_agent = DQNAgent(len(state), env.action_space.n, env.action_space)
     device = dqn_agent.device
     if torch.cuda.is_available() or torch.backends.mps.is_available():
-        num_episodes = 600
+        num_episodes = 6000
     else:
-        num_episodes = 50
+        num_episodes = 1000
 
     for i_episode in range(num_episodes):
         # Initialize the environment and get its state
