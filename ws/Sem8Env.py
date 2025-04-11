@@ -10,25 +10,52 @@ import os
 import random
 
 
+class DiscreteBoxSpace(spaces.Space):
+    def __init__(self, width, height, shape=None, dtype=np.int64):
+        super().__init__(shape=shape, dtype=dtype)
+        self._width = width
+        self._height = height
+
+        self._space = spaces.Discrete(width * height)
+
+    # mask is a 2D numpy array of np.int8
+    def sample(
+        self, mask: np.ndarray | None = None, probability: np.ndarray | None = None
+    ):
+        flattened_mask = mask.flatten() if mask is not None else None
+        position = self._space.sample(mask=flattened_mask, probability=probability)
+        x, y = self._index_to_xy(position)
+
+        return np.array([x, y], dtype=self.dtype)
+
+    def _index_to_xy(self, index):
+        x = index % self._width
+        y = index // self._width
+        return x, y
+
+    def contains(self, x) -> bool:
+        x_coordinate, y_coordinate = x
+        return 0 <= x_coordinate < self._width and 0 <= y_coordinate < self._height
+
+
 class Sem8Env(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
     def __init__(self, render_mode=None, **kwargs) -> None:
         super().__init__()
-        self._agent_position = np.array([-1, -1], dtype=np.float32)
         self._agent_angle = 0.0
         self._agent_speed = 5
         self._agent_turn_speed = 10
-        self._agent_radius = 120
+        self._agent_radius = 60
 
-        self._target_radius = 120
+        self._target_radius = 60
 
-        self.action_space = spaces.Discrete(2)  # Forward, Left, Right
+        self.action_space = spaces.Discrete(4)  # Forward, Left, Right, Pick up
         self.observation_space = spaces.Tuple(
             (
-                spaces.Discrete(1),  # x coordinate
-                spaces.Discrete(1),  # y coordinate
+                DiscreteBoxSpace(1, 1),  # agent position
                 spaces.Discrete(1),  # angle
+                DiscreteBoxSpace(1, 1),  # target position
             )
         )
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -42,9 +69,9 @@ class Sem8Env(gym.Env):
 
     def _get_obs(self):
         return (
-            math.floor(self._agent_position[0]),
-            math.floor(self._agent_position[1]),
-            math.floor(self._agent_angle),
+            np.floor(self._agent_position),
+            np.floor(self._agent_angle),
+            np.floor(self._target_position),
         )
 
     def _get_info(self):
@@ -67,6 +94,13 @@ class Sem8Env(gym.Env):
                 bboxes.append(bbox)
         return image, bboxes
 
+    def _apply_boundary_mask(self, mask: np.ndarray, radius: int):
+        mask[0 : radius + 1] = 0
+        mask[-radius:] = 0
+        mask[:, 0 : radius + 1] = 0
+        mask[:, -radius:] = 0
+        return mask
+
     @override
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
@@ -74,29 +108,24 @@ class Sem8Env(gym.Env):
         self._width, self._height = self._image.get_width(), self._image.get_height()
         self.observation_space = spaces.Tuple(
             (
-                spaces.Discrete(self._width),  # x coordinate
-                spaces.Discrete(self._height),  # y coordinate
+                DiscreteBoxSpace(self._width, self._height),  # agent position
                 spaces.Discrete(360),  # angle
+                DiscreteBoxSpace(self._width, self._height),  # target position
             )
         )
-        x_mask = np.ones(self._width, dtype=np.int8)
-        y_mask = np.ones(self._height, dtype=np.int8)
+        agent_mask = np.ones((self._width, self._height), dtype=np.int8)
         angle_mask = np.ones(360, dtype=np.int8)
-        x_mask[0 : self._agent_radius + 1] = 0
-        x_mask[self._width - self._agent_radius :] = 0
-        y_mask[0 : self._agent_radius + 1] = 0
-        y_mask[self._height - self._agent_radius :] = 0
-        agent_init = self.observation_space.sample(mask=(x_mask, y_mask, angle_mask))
-        self._agent_position[0], self._agent_position[1], self._agent_angle = agent_init
-        x_mask = np.ones(self._width, dtype=np.int8)
-        y_mask = np.ones(self._height, dtype=np.int8)
-        x_mask[0 : self._target_radius + 1] = 0
-        x_mask[self._width - self._target_radius :] = 0
-        y_mask[0 : self._target_radius + 1] = 0
-        y_mask[self._height - self._target_radius :] = 0
-        target_init = self.observation_space.sample(mask=(x_mask, y_mask, angle_mask))
-        self._target_position = np.array([target_init[0], target_init[1]])
+        target_mask = np.ones((self._width, self._height), dtype=np.int8)
 
+        agent_mask = self._apply_boundary_mask(agent_mask, self._agent_radius)
+        target_mask = self._apply_boundary_mask(target_mask, self._target_radius)
+
+        state_sample = self.observation_space.sample(
+            mask=(agent_mask, angle_mask, target_mask)
+        )
+        self._agent_position, self._agent_angle, self._target_position = state_sample
+        # Sample returns integers, but we want floats for math purposes
+        self._agent_position = np.array(self._agent_position, dtype=np.float64)
         if self.render_mode == "human":
             self._render_frame()
 
@@ -111,6 +140,8 @@ class Sem8Env(gym.Env):
 
     @override
     def step(self, action):
+        reward = -1
+        terminated = False
         if action == 0:
             # Go forward
             self._agent_position[0] += self._agent_speed * np.cos(
@@ -124,19 +155,21 @@ class Sem8Env(gym.Env):
                 [self._agent_radius, self._agent_radius],
                 [self._width - self._agent_radius, self._height - self._agent_radius],
             )
-        if action == 1:
+        elif action == 1:
             self._agent_angle += self._agent_turn_speed
-        if action == 2:
+        elif action == 2:
             self._agent_angle -= self._agent_turn_speed
+        elif action == 3:
+            correct_pick_up = self._agent_collide_with_object(
+                self._agent_position, self._target_position
+            )
+            reward = 5 if correct_pick_up else -5
+            terminated = correct_pick_up
 
         if self.render_mode == "human":
             self._render_frame()
 
-        terminated = self._agent_collide_with_object(
-            self._agent_position, self._target_position
-        )
         truncated = False
-        reward = 1 if terminated else -1
         observation = self._get_obs()
         return_info = self._get_info()
 
@@ -157,23 +190,22 @@ class Sem8Env(gym.Env):
 
         render_surface = pygame.Surface((self._width, self._height))
         render_surface.blit(self._image, (0, 0))
-
         pygame.draw.circle(
             render_surface,
             (0, 255, 0),
-            self._agent_position.tolist(),
+            self._agent_position,
             self._agent_radius,
         )
         pygame.draw.circle(
             render_surface,
             (0, 0, 255),
-            self._target_position.tolist(),
+            self._target_position,
             self._target_radius,
         )
         pygame.draw.line(
             render_surface,
             (255, 0, 0),
-            self._agent_position.tolist(),
+            self._agent_position,
             (
                 self._agent_position[0] + 50 * np.cos(np.radians(self._agent_angle)),
                 self._agent_position[1] + 50 * np.sin(np.radians(self._agent_angle)),
