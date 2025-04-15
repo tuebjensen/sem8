@@ -21,11 +21,11 @@ Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"
 
 
 class DQN(nn.Module):
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim, output_dim, hidden_dim=128):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, output_dim)
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
@@ -50,7 +50,7 @@ class ReplayMemory(object):
 
 
 class DQNAgent:
-    def __init__(self, input_dim, output_dim, action_space):
+    def __init__(self, input_dim, output_dim, action_space, hidden_dim=128):
         # self.batch_size is the number of transitions sampled from the replay buffer
         # GAMMA is the discount factor as mentioned in the previous section
         # EPS_START is the starting value of epsilon
@@ -72,8 +72,8 @@ class DQNAgent:
         self.n_actions = output_dim
         self.n_observations = input_dim
 
-        self.policy_net = DQN(input_dim, output_dim).to(self.device)
-        self.target_net = DQN(input_dim, output_dim).to(self.device)
+        self.policy_net = DQN(input_dim, output_dim, hidden_dim).to(self.device)
+        self.target_net = DQN(input_dim, output_dim, hidden_dim).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
         self.optimizer = optim.AdamW(

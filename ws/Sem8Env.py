@@ -44,8 +44,8 @@ class Sem8Env(gym.Env):
     def __init__(self, render_mode=None, **kwargs) -> None:
         super().__init__()
         self._agent_angle = 0.0
-        self._agent_speed = 5
-        self._agent_turn_speed = 10
+        self._agent_speed = 25
+        self._agent_turn_speed = 5
         self._agent_radius = 60
 
         self._target_radius = 60
@@ -156,9 +156,9 @@ class Sem8Env(gym.Env):
                 [self._width - self._agent_radius, self._height - self._agent_radius],
             )
         elif action == 1:
-            self._agent_angle += self._agent_turn_speed
+            self._agent_angle = (self._agent_angle + self._agent_turn_speed) % 360
         elif action == 2:
-            self._agent_angle -= self._agent_turn_speed
+            self._agent_angle = (self._agent_angle - self._agent_turn_speed) % 360
         elif action == 3:
             correct_pick_up = self._agent_collide_with_object(
                 self._agent_position, self._target_position
