@@ -1,6 +1,6 @@
 import sys
 import math
-from typing import Any, override
+from typing import Any
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -101,7 +101,6 @@ class Sem8Env(gym.Env):
         mask[:, -radius:] = 0
         return mask
 
-    @override
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
         self._image, self._bboxes = self._load_random_image_with_bbox()
@@ -138,7 +137,6 @@ class Sem8Env(gym.Env):
         distance = np.linalg.norm(agent_pos - object_pos)
         return distance <= self._target_radius + self._agent_radius
 
-    @override
     def step(self, action):
         reward = -1
         terminated = False
@@ -175,7 +173,6 @@ class Sem8Env(gym.Env):
 
         return observation, reward, terminated, truncated, return_info
 
-    @override
     def render(self):
         if self.render_mode == "rgb_array":
             return self._render_frame()
