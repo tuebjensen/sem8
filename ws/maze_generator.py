@@ -1,21 +1,20 @@
-import numpy as np
-import os
-import pygame
-import random
 import json
+import math
+import os
+import random
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pygame
 from mazelib import Maze
 from mazelib.generate.DungeonRooms import DungeonRooms
-import math
-import matplotlib.pyplot as plt
-
-annotation_file = "images/instances_default.json"
-
-with open(annotation_file) as f:
-    annotation_dict = json.load(f)
 
 
 # load image with bounding box
 def load_random_image_with_bbox():
+    annotation_file = "images/instances_default.json"
+    with open(annotation_file) as f:
+        annotation_dict = json.load(f)
     image_object = random.choice(annotation_dict["images"])
     image_file_name = image_object["file_name"]
     image_dir = "images"
@@ -54,16 +53,51 @@ def draw_bboxes(image, bboxes):
     return image
 
 
-def showPNG(grid):
-    """Generate a simple image of the maze."""
-    plt.figure(figsize=(10, 5))
-    plt.imshow(grid, cmap=plt.cm.binary, interpolation="nearest")
-    plt.xticks([]), plt.yticks([])
-    plt.show()
+def draw_lines(surface, lines):
+    for line in lines:
+        pygame.draw.line(surface, (0, 255, 0), line["line_start"], line["line_end"], 3)
 
 
-def draw_line(image, line_start, line_end):
-    pygame.draw.line(image, (0, 255, 0), line_start, line_end, 3)
+def draw_maze(surface, grid, cell_size):
+    # We have to divide the coordinates by 2 because mazelib generates a bigger grid
+    lines = lines_from_maze(grid, cell_size)
+    draw_lines(surface, lines)
+
+
+def lines_from_maze(grid, cell_size):
+    lines = []
+    # We have to divide the coordinates by 2 because mazelib generates a bigger grid
+    for i in range(len(grid)):
+        for j in range(len(grid[0])):
+            if grid[i, j] == 1:
+                if i > 0 and grid[i - 1, j] == 1:
+                    line_start = (j / cell_size / 2, i / cell_size / 2)
+                    line_end = (j / cell_size / 2, (i - 1) / cell_size / 2)
+                    # Flip line start and end to make the line go from top to bottom, left to right
+                    lines.append({"line_start": line_end, "line_end": line_start})
+
+                if j > 0 and grid[i, j - 1] == 1:
+                    line_start = (j / cell_size / 2, i / cell_size / 2)
+                    line_end = ((j - 1) / cell_size / 2, i / cell_size / 2)
+                    lines.append({"line_start": line_end, "line_end": line_start})
+    return lines
+
+
+def rooms_from_bboxes(bboxes, cell_size):
+    # Calculate the room coordinates in the grid
+    # The coordinates are in the format (y, x) for the grid
+    # Multiply by 2 for similar reasons as in draw_maze
+    rooms = []
+    for bbox in bboxes:
+        x, y, w, h = bbox
+        top_left_coord = (math.floor(y * cell_size * 2), math.floor(x * cell_size * 2))
+        bottom_right_coord = (
+            math.floor((y + h) * cell_size * 2),
+            math.floor((x + w) * cell_size * 2),
+        )
+        room = [top_left_coord, bottom_right_coord]
+        rooms.append(room)
+    return rooms
 
 
 def main():
@@ -72,9 +106,8 @@ def main():
     width, height = image.get_size()
     desired_grid_width = 5
     desired_grid_height = 10
-    desired_grid_area = (
-        desired_grid_width * desired_grid_height
-    )  # desired_grid_width * desired_grid_height
+    # Maze density
+    desired_grid_area = desired_grid_width * desired_grid_height
     image_area = width * height
     scale = math.sqrt(desired_grid_area / image_area)
     grid_width = round(width * scale)
@@ -85,33 +118,14 @@ def main():
     bbox_x_scale = new_image_width / width
     bbox_y_scale = new_image_height / height
     bboxes = scale_bboxes(bboxes, bbox_x_scale, bbox_y_scale)
-    window = pygame.display.set_mode((new_image_width, new_image_height))
+    window = pygame.display.set_mode((new_image_width * 2, new_image_height * 2))
     image = draw_bboxes(image, bboxes)
-    robot_radius = 20
-    print("Initial image dimensions", width, height)
-    print("scale", scale)
-    print("Grid dimensions", grid_width, grid_height)
-    print("Resized image dimensons", image.get_size())
-    print(
-        "Resized image dimension divided by scale", np.array(image.get_size()) * scale
-    )
+    rooms = rooms_from_bboxes(bboxes, scale)
     m = Maze()
-    m.generator = DungeonRooms(grid_height, grid_width)
+    m.generator = DungeonRooms(grid_height, grid_width, rooms=rooms)
+
     m.generate()
     grid = m.grid
-    for i in range(len(grid)):
-        for j in range(len(grid[0])):
-            if grid[i, j] == 1:
-                if i > 0 and grid[i - 1, j] == 1:
-                    line_start = (j / scale / 2, i / scale / 2)
-                    line_end = (j / scale / 2, (i - 1) / scale / 2)
-                    draw_line(image, line_start, line_end)
-
-                if j > 0 and grid[i, j - 1] == 1:
-                    line_start = (j / scale / 2, i / scale / 2)
-                    line_end = ((j - 1) / scale / 2, i / scale / 2)
-                    draw_line(image, line_start, line_end)
-
     running = True
     while running:
         for event in pygame.event.get():
@@ -119,6 +133,7 @@ def main():
                 running = False
 
         window.blit(image, (0, 0))
+        draw_maze(window, grid, scale)
         pygame.display.flip()
 
     pygame.quit()

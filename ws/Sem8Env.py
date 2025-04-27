@@ -1,13 +1,14 @@
-import sys
-import math
-from typing import Any
-import gymnasium as gym
-import numpy as np
-from gymnasium import spaces
-import pygame
 import json
+import math
 import os
 import random
+import sys
+from typing import Any
+
+import gymnasium as gym
+import numpy as np
+import pygame
+from gymnasium import spaces
 
 
 class DiscreteBoxSpace(spaces.Space):
@@ -63,8 +64,8 @@ class Sem8Env(gym.Env):
 
         self.window = None
         self.clock = None
-
-        with open("images/instances_default.json") as f:
+        self._annotations_path = os.path.join("output", "meta_data.json")
+        with open(self._annotations_path) as f:
             self._annotation_dict = json.load(f)
 
     def _get_obs(self):
@@ -79,20 +80,23 @@ class Sem8Env(gym.Env):
             "image": self._image,
         }
 
-    def _load_random_image_with_bbox(self):
+    def _load_random_image_bbox_maze(self):
         image_object = random.choice(self._annotation_dict["images"])
         image_file_name = image_object["file_name"]
-        image_dir = "images"
+        image_dir = os.path.dirname(self._annotations_path)
         image_path = os.path.join(image_dir, image_file_name)
         image = pygame.image.load(image_path)
-        image_id = image_object["id"]
-        annotations = self._annotation_dict["annotations"]
+
         bboxes = []
-        for annotation in annotations:
-            if annotation["image_id"] == image_id:
-                bbox = annotation["bbox"]
-                bboxes.append(bbox)
-        return image, bboxes
+        category_ids = []
+        for bbox_object in image_object["bbox_objects"]:
+            bbox = bbox_object["bbox"]
+            category_id = bbox_object["category_id"]
+            bboxes.append(bbox)
+            category_ids.append(category_id)
+        maze_lines = random.choice(image_object["mazes"])
+
+        return image, bboxes, category_ids, maze_lines
 
     def _apply_boundary_mask(self, mask: np.ndarray, radius: int):
         mask[0 : radius + 1] = 0
@@ -103,7 +107,9 @@ class Sem8Env(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
-        self._image, self._bboxes = self._load_random_image_with_bbox()
+        self._image, self._bboxes, self._category_ids, self._maze_lines = (
+            self._load_random_image_bbox_maze()
+        )
         self._width, self._height = self._image.get_width(), self._image.get_height()
         self.observation_space = spaces.Tuple(
             (
@@ -185,8 +191,9 @@ class Sem8Env(gym.Env):
         if self.clock == None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
 
-        render_surface = pygame.Surface((self._width, self._height))
-        render_surface.blit(self._image, (0, 0))
+        # render_surface = pygame.Surface((self._width, self._height))
+        render_surface = self._image
+        # render_surface.blit(self._image, (0, 0))
         pygame.draw.circle(
             render_surface,
             (0, 255, 0),
