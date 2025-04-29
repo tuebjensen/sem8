@@ -37,7 +37,7 @@ def main():
                 env.action_space.sample()
             )  # agent policy that uses the observation and info
             observation, reward, terminated, truncated, info = env.step(action)
-
+            
             episode_over = terminated or truncated
 
         info["episode"]["i"] = i

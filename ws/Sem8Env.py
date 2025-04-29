@@ -67,6 +67,9 @@ class Sem8Env(gym.Env):
         self._annotations_path = os.path.join("output", "meta_data.json")
         with open(self._annotations_path) as f:
             self._annotation_dict = json.load(f)
+        self._categories_dict = {
+            category["id"]: category for category in self._annotation_dict["categories"]
+        }
 
     def _get_obs(self):
         return (
@@ -105,12 +108,46 @@ class Sem8Env(gym.Env):
         mask[:, -radius:] = 0
         return mask
 
+    def _apply_rect_mask(self, mask: np.ndarray, rects: list[pygame.Rect]):
+        for rect in rects:
+            mask[rect.left : rect.right, rect.top : rect.bottom] = 0
+        return mask
+
+    def _make_bbox_rects(self, bboxes):
+        bbox_rects = []
+        for bbox in bboxes:
+            rect = pygame.Rect(bbox)
+        return bbox_rects
+
+    def _make_maze_rects(self, maze_lines):
+        maze_rects = []
+        for line in maze_lines:
+            line_width = 2
+            x_start = math.floor(line["line_start"][0])
+            y_start = math.floor(line["line_start"][1])
+            x_end = math.floor(line["line_end"][0])
+            y_end = math.floor(line["line_end"][1])
+            rect_width = max(abs(x_end - x_start), line_width)
+            rect_height = max(abs(y_end - y_start), line_width)
+            x_start = min(x_start, self._width - line_width)
+            y_start = min(y_start, self._height - line_width)
+            maze_rect = pygame.Rect(x_start, y_start, rect_width, rect_height)
+            maze_rects.append(maze_rect)
+        return maze_rects
+
+    def _draw_rects(self, surface, rects):
+        for rect in rects:
+            pygame.draw.rect(surface, (0, 255, 0), rect)
+
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
         self._image, self._bboxes, self._category_ids, self._maze_lines = (
             self._load_random_image_bbox_maze()
         )
-        self._width, self._height = self._image.get_width(), self._image.get_height()
+        self._maze_rects = self._make_maze_rects(self._maze_lines)
+        self._bbox_rects = self._make_bbox_rects(self._bboxes)
+        self._draw_rects(self._image, self._maze_rects)
+        self._width, self._height = self._image.get_size()
         self.observation_space = spaces.Tuple(
             (
                 DiscreteBoxSpace(self._width, self._height),  # agent position
@@ -123,7 +160,14 @@ class Sem8Env(gym.Env):
         target_mask = np.ones((self._width, self._height), dtype=np.int8)
 
         agent_mask = self._apply_boundary_mask(agent_mask, self._agent_radius)
+        agent_mask = self._apply_rect_mask(
+            agent_mask, self._bbox_rects, self._agent_radius
+        )
         target_mask = self._apply_boundary_mask(target_mask, self._target_radius)
+        target_mask = self._apply_rect_mask(
+            target_mask,
+            self._bbox_rects,
+        )
 
         state_sample = self.observation_space.sample(
             mask=(agent_mask, angle_mask, target_mask)
@@ -138,6 +182,23 @@ class Sem8Env(gym.Env):
         return_info = self._get_info()
 
         return observation, return_info
+
+    def _circle_aa_rect_collision(self, center, radius, rect):
+        # collision between circle and axis-aligned rectangle
+        coll_x, coll_y = center
+        if coll_x < rect.left:
+            coll_x = rect.left
+        elif coll_x > rect.right:
+            coll_x = rect.right
+        if coll_y < rect.top:
+            coll_y = rect.top
+        elif coll_y > rect.bottom:
+            coll_y = rect.bottom
+        dist_x = center[0] - coll_x
+        dist_y = center[1] - coll_y
+        distance_squared = dist_x * dist_x + dist_y * dist_y
+        collided = distance_squared <= radius * radius
+        return collided, coll_x, coll_y
 
     def _agent_collide_with_object(self, agent_pos: np.ndarray, object_pos: np.ndarray):
         distance = np.linalg.norm(agent_pos - object_pos)
