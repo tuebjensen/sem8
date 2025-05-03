@@ -12,4 +12,8 @@ wheel==0.45.1
 ninja==1.11.1.4
 packaging==25.0
 tqdm==4.67.1
+transformers==4.51.3
 flash_attn==2.7.4.post1
+requests==2.32.3
+#:PIL
+peft==0.15.2
