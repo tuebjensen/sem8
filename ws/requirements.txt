@@ -4,5 +4,12 @@ matplotlib==3.10.1
 mazelib==0.9.16
 numpy==2.2.5
 pygame==2.6.1
-torch==2.7.0+cu126
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+decord==0.6.0
+wheel==0.45.1
+ninja==1.11.1.4
+packaging==25.0
 tqdm==4.67.1
+flash_attn==2.7.4.post1
