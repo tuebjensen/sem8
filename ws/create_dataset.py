@@ -96,33 +96,35 @@ def images_iterator(images, annotations):
         yield image, bboxes, category_ids
 
 
-def find_acceptable_object_image():
-    pass
+# Pseudo code for the recursive function (note that this is not exactly how it is implemented right now)
+
+# def find_acceptable_object_image():
+#     pass
 
 
-def place_object(object_image):
-    pass
+# def place_object(object_image):
+#     pass
 
 
-def check_placement(top, left, object_image):
-    pass
+# def check_placement(top, left, object_image):
+#     pass
 
 
-def pseudo_function(sampled_categories, max_tries):
-    if len(sampled_categories) == 0:
-        return []
+# def pseudo_function(sampled_categories, max_tries):
+#     if len(sampled_categories) == 0:
+#         return []
 
-    category = sampled_categories[0]
-    object_image = find_acceptable_object_image()
-    for _ in range(max_tries):
-        top, left = place_object(object_image)
-        successful_placement = check_placement(top, left, object_image)
-        if successful_placement:
-            child_object_images = pseudo_function(sampled_categories[1:], max_tries)
-            if child_object_images is not None:
-                return [(top, left, object_image)].extend(child_object_images)
+#     category = sampled_categories[0]
+#     object_image = find_acceptable_object_image()
+#     for _ in range(max_tries):
+#         top, left = place_object(object_image)
+#         successful_placement = check_placement(top, left, object_image)
+#         if successful_placement:
+#             child_object_images = pseudo_function(sampled_categories[1:], max_tries)
+#             if child_object_images is not None:
+#                 return [(top, left, object_image)].extend(child_object_images)
 
-    return None
+#     return None
 
 
 def generate_image():

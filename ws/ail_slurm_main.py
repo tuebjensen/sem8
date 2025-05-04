@@ -12,6 +12,7 @@ if __name__ == "__main__":
 
     if not args.no_install:
         subprocess.call([sys.executable, "-m", "ensurepip"])
+        subprocess.call(["mkdir", "-p", "../pip-cache"])
         subprocess.call(
             [
                 sys.executable,
@@ -24,7 +25,7 @@ if __name__ == "__main__":
             ],
             # set the TMPDIR environment variable to a directory in the current
             # directory to avoid storage limit issues on the /tmp directory
-            env=(dict(os.environ) | {"TMPDIR": "./pip-cache"}),
+            env=(dict(os.environ) | {"TMPDIR": "../pip-cache"}),
         )
 
     import torch
