@@ -17,18 +17,18 @@ import os
 
 import torch
 from torch import nn
-from transformers.models.auto.configuration_auto import AutoConfig
-from transformers.models.auto.modeling_auto import AutoModel
+from transformers import AutoConfig, AutoModel
 from transformers.feature_extraction_utils import BatchFeature
 
-from .eagle2_hg_model.inference_eagle_repo import (
+import gr00t
+from gr00t.model.backbone.eagle2_hg_model.inference_eagle_repo import (
     reshape_model_embeddings,
 )
 
 from .eagle2_hg_model.inference_eagle_repo import EagleProcessor, ModelSpecificValues
 
 DEFAULT_EAGLE_MODEL_NAME = os.path.join(
-    os.path.dirname(__file__), "eagle2_hg_model"
+    os.path.dirname(gr00t.__file__), "model", "backbone", "eagle2_hg_model"
 )
 
 
