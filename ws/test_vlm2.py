@@ -4,6 +4,26 @@ import torch
 from PIL import Image
 from transformers import AutoModel, AutoProcessor
 
+select_layer = 12
+
+
+def reduce_model(model):
+    model.neftune_alpha = None
+
+    # reduce vision model (Siglip)
+    if hasattr(model.vision_model, "vision_model") and hasattr(
+        model.vision_model.vision_model, "head"
+    ):
+        model.vision_model.vision_model.head = torch.nn.Identity()
+
+    # remove LLM (Qwen)
+    model.language_model.lm_head = torch.nn.Identity()
+    while len(model.language_model.model.layers) > select_layer:
+        model.language_model.model.layers.pop(-1)
+
+    # Gr00t also removes model.vision_model.vision_model.vision_towers, but we
+    # don't have that
+
 
 def get_embeddings(
     model,
@@ -88,6 +108,7 @@ def main():
     inputs = inputs.to("cuda")
     model = model.to("cuda")
     img_context_token_id = processor.tokenizer.convert_tokens_to_ids("<IMG_CONTEXT>")
+    reduce_model(model)
 
     # time the next few lines
     start = time.perf_counter()
@@ -100,8 +121,22 @@ def main():
             attention_mask=inputs["attention_mask"],
             img_context_token_id=img_context_token_id,
         )
-        print("Time taken:", time.perf_counter() - start)
-        print(output)
+    print("Time taken:", time.perf_counter() - start)
+    print(output)
+
+    # time twice to see if hot start helps
+    start = time.perf_counter()
+    with torch.no_grad():
+        output = get_embeddings(
+            model,
+            reproject_vision=False,
+            pixel_values=inputs["pixel_values"],
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            img_context_token_id=img_context_token_id,
+        )
+    print("Time taken:", time.perf_counter() - start)
+    print(output)
 
 
 def modify_parser(parser):
