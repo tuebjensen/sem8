@@ -7,6 +7,7 @@
 
 import argparse
 import dataclasses
+import json
 import os
 import pickle
 import time
@@ -67,9 +68,29 @@ def main(args):
     if args.load_experiment:
         exp = load_experiment(args.save_folder, args.project_name, device, args)
     else:
-        env = env_preprocessing.Env(args.env, args.seed, eval_env=False)
+        eval_eps = args.eval_eps
+        eval_data_folder_path = ""
+        if args.eval_data_folder != "":
+            eval_data_folder_path = os.path.abspath(args.eval_data_folder)
+            # Make sure that data directory exists
+            assert os.path.exists(eval_data_folder_path), "eval_data_dir does not exist"
+            with open(os.path.join(eval_data_folder_path, "meta_data.json"), "r") as f:
+                meta_data = json.load(f)
+            eval_eps = len(meta_data)
+
+        env = env_preprocessing.Env(
+            args.env,
+            args.seed,
+            eval_env=False,
+            eval_data_dir=eval_data_folder_path,
+            remove_info=False,
+        )
         eval_env = env_preprocessing.Env(
-            args.env, args.seed + 100, eval_env=True
+            args.env,
+            args.seed + 100,
+            eval_env=True,
+            eval_data_dir=eval_data_folder_path,
+            remove_info=False,
         )  # +100 to make sure the seed is different.
 
         agent = MRQ.Agent(
@@ -94,7 +115,7 @@ def main(args):
             args.total_timesteps,
             0,
             args.eval_freq,
-            args.eval_eps,
+            eval_eps,
             args.eval_folder,
             args.project_name,
             args.save_experiment,
@@ -321,6 +342,8 @@ def modify_parser(parser):
         "--eval_freq", default=-1, type=int
     )  # Uses default, input to override.
     parser.add_argument("--eval_eps", default=10, type=int)
+    parser.add_argument("--eval_data_folder", default="", type=str)
+
     # File name and locations
     parser.add_argument(
         "--project_name", default="", type=str
