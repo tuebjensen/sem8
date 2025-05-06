@@ -1,4 +1,5 @@
 import time
+
 import requests
 import torch
 from PIL import Image

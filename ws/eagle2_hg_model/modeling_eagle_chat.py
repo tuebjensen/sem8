@@ -51,14 +51,18 @@ class Eagle2ChatModel(PreTrainedModel):
     _supports_static_cache = False
     _supports_attention_backend = False
 
-    def __init__(self, config: Eagle2ChatConfig, vision_model=None, language_model=None):
+    def __init__(
+        self, config: Eagle2ChatConfig, vision_model=None, language_model=None
+    ):
         super().__init__(config)
 
         image_size = config.force_image_size or config.vision_config.image_size
 
         patch_size = config.vision_config.patch_size
         self.patch_size = patch_size
-        self.num_image_token = int((image_size // patch_size) ** 2 * (config.downsample_ratio**2))
+        self.num_image_token = int(
+            (image_size // patch_size) ** 2 * (config.downsample_ratio**2)
+        )
 
         self.select_layer = config.select_layer
         self.template = config.template
@@ -87,7 +91,9 @@ class Eagle2ChatModel(PreTrainedModel):
 
         self.mlp1 = nn.Sequential(
             nn.LayerNorm(vit_hidden_size * int(1 / self.downsample_ratio) ** 2),
-            nn.Linear(vit_hidden_size * int(1 / self.downsample_ratio) ** 2, llm_hidden_size),
+            nn.Linear(
+                vit_hidden_size * int(1 / self.downsample_ratio) ** 2, llm_hidden_size
+            ),
             nn.GELU(),
             nn.Linear(llm_hidden_size, llm_hidden_size),
         )
@@ -100,7 +106,9 @@ class Eagle2ChatModel(PreTrainedModel):
             )
 
         if config.use_llm_lora:
-            self.wrap_llm_lora(r=config.use_llm_lora, lora_alpha=2 * config.use_llm_lora)
+            self.wrap_llm_lora(
+                r=config.use_llm_lora, lora_alpha=2 * config.use_llm_lora
+            )
 
     def wrap_backbone_lora(self, r=128, lora_alpha=256, lora_dropout=0.05):
         lora_config = LoraConfig(
@@ -147,7 +155,9 @@ class Eagle2ChatModel(PreTrainedModel):
         return_dict: Optional[bool] = None,
         num_patches_list: Optional[List[torch.Tensor]] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         image_flags = image_flags.squeeze(-1)
         input_embeds = self.language_model.get_input_embeddings()(input_ids)
@@ -171,7 +181,9 @@ class Eagle2ChatModel(PreTrainedModel):
         input_ids = input_ids.reshape(B * N)
         selected = input_ids == self.img_context_token_id
         try:
-            input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds.reshape(-1, C)
+            input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds.reshape(
+                -1, C
+            )
         except Exception as e:
             vit_embeds = vit_embeds.reshape(-1, C)
             print(
@@ -227,7 +239,10 @@ class Eagle2ChatModel(PreTrainedModel):
         x = x.permute(0, 2, 1, 3).contiguous()
         # N, H * scale, W, C // scale --> N, H * scale, W * scale, C // (scale ** 2)
         x = x.view(
-            n, int(h * scale_factor), int(w * scale_factor), int(c / (scale_factor * scale_factor))
+            n,
+            int(h * scale_factor),
+            int(w * scale_factor),
+            int(c / (scale_factor * scale_factor)),
         )
         x = x.permute(0, 2, 1, 3).contiguous()
         return x
@@ -288,7 +303,9 @@ class Eagle2ChatModel(PreTrainedModel):
 
         if image_counts is not None:
             num_patches_list = image_counts
-            print("Warning: `image_counts` is deprecated. Please use `num_patches_list` instead.")
+            print(
+                "Warning: `image_counts` is deprecated. Please use `num_patches_list` instead."
+            )
 
         img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
         self.img_context_token_id = img_context_token_id
@@ -351,7 +368,9 @@ class Eagle2ChatModel(PreTrainedModel):
             question = "<image>\n" + question
 
         if num_patches_list is None:
-            num_patches_list = [pixel_values.shape[0]] if pixel_values is not None else []
+            num_patches_list = (
+                [pixel_values.shape[0]] if pixel_values is not None else []
+            )
         assert pixel_values is None or len(pixel_values) == sum(num_patches_list)
 
         img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
@@ -395,14 +414,18 @@ class Eagle2ChatModel(PreTrainedModel):
             attention_mask=attention_mask,
             **generation_config,
         )
-        response = tokenizer.batch_decode(generation_output, skip_special_tokens=True)[0]
+        response = tokenizer.batch_decode(generation_output, skip_special_tokens=True)[
+            0
+        ]
         response = response.split(sep)[0].strip()
         history.append((question, response))
         if return_history:
             return response, history
         else:
             query_to_print = query.replace(IMG_CONTEXT_TOKEN, "")
-            query_to_print = query_to_print.replace(f"{IMG_START_TOKEN}{IMG_END_TOKEN}", "<image>")
+            query_to_print = query_to_print.replace(
+                f"{IMG_START_TOKEN}{IMG_END_TOKEN}", "<image>"
+            )
             if verbose:
                 print(query_to_print, response)
             return response

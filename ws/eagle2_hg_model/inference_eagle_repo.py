@@ -27,19 +27,13 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoConfig, AutoTokenizer
 from transformers.feature_extraction_utils import BatchFeature
 
-import gr00t
-from gr00t.model.backbone.eagle2_hg_model.conversation_repo import get_conv_template
+from .conversation_repo import get_conv_template
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 SIGLIP_MEAN = (0.5, 0.5, 0.5)
 SIGLIP_STD = (0.5, 0.5, 0.5)
-
-
-DEFAULT_EAGLE_MODEL_NAME = os.path.join(
-    os.path.dirname(gr00t.__file__), "model", "backbone", "eagle2_hg_model"
-)
 
 
 def get_seq_frames(total_num_frames, desired_num_frames=-1, stride=-1):
@@ -54,7 +48,11 @@ def get_seq_frames(total_num_frames, desired_num_frames=-1, stride=-1):
     list: List of indices of frames to extract.
     """
 
-    assert desired_num_frames > 0 or stride > 0 and not (desired_num_frames > 0 and stride > 0)
+    assert (
+        desired_num_frames > 0
+        or stride > 0
+        and not (desired_num_frames > 0 and stride > 0)
+    )
 
     if stride > 0:
         return list(range(0, total_num_frames, stride))
@@ -81,9 +79,11 @@ def build_video_prompt(meta_list, num_frames, time_position=False):
     prefix = "This is a video:\n"
     for i in range(num_frames):
         if time_position:
-            frame_txt = f"Frame {i+1} sampled at {meta_list[i]:.2f} seconds: <image>\n"
+            frame_txt = (
+                f"Frame {i + 1} sampled at {meta_list[i]:.2f} seconds: <image>\n"
+            )
         else:
-            frame_txt = f"Frame {i+1}: <image>\n"
+            frame_txt = f"Frame {i + 1}: <image>\n"
         prefix += frame_txt
     return prefix
 
@@ -100,7 +100,9 @@ def load_video(video_path, num_frames=64, frame_cache_root=None):
     frames = video.get_batch(sampled_frames).asnumpy()
     images = [Image.fromarray(frame) for frame in frames]
 
-    return images, build_video_prompt(samepld_timestamps, len(images), time_position=True)
+    return images, build_video_prompt(
+        samepld_timestamps, len(images), time_position=True
+    )
 
 
 def load_image(image):
@@ -141,7 +143,9 @@ def build_transform(input_size, norm_type="imagenet"):
     return transform
 
 
-def find_closest_aspect_ratio_v2(aspect_ratio, target_ratios, width, height, image_size):
+def find_closest_aspect_ratio_v2(
+    aspect_ratio, target_ratios, width, height, image_size
+):
     """
     previous version mainly foucs on ratio.
     We also consider area ratio here.
@@ -167,7 +171,9 @@ def find_closest_aspect_ratio_v2(aspect_ratio, target_ratios, width, height, ima
     return best_ratio
 
 
-def dynamic_preprocess(image, min_num=1, max_num=6, image_size=448, use_thumbnail=False):
+def dynamic_preprocess(
+    image, min_num=1, max_num=6, image_size=448, use_thumbnail=False
+):
     orig_width, orig_height = image.size
     aspect_ratio = orig_width / orig_height
 
@@ -234,7 +240,9 @@ def prepare(
         question = "<image>\n" + question
 
     if num_patches_list is None:
-        num_patches_list = [1] * pixel_values.shape[0] if pixel_values is not None else []
+        num_patches_list = (
+            [1] * pixel_values.shape[0] if pixel_values is not None else []
+        )
     assert pixel_values is None or len(pixel_values) == sum(num_patches_list)
 
     template = get_conv_template(model_spec.template)
@@ -276,21 +284,9 @@ class EagleProcessor:
         max_input_tiles: int = 1,
         use_local_eagle_hg_model: bool = True,
     ):
-        # This defaults use local eagle hg model card
-        if model_path is None or use_local_eagle_hg_model:
-            model_path = DEFAULT_EAGLE_MODEL_NAME
-
         if model_path.endswith("/"):
             model_path = model_path[:-1]
 
-        # This is to allow an huggingface model to be loaded from a local path with
-        # e.g. $GR00T_BACKBONE_PATH/eagle_1_7b/
-        if "$GR00T_BACKBONE_PATH" in model_path:
-            import gr00t
-
-            pkg_path = os.path.dirname(gr00t.__file__)
-            pkg_path = os.path.join(pkg_path, "model", "backbone")
-            model_path = model_path.replace("$GR00T_BACKBONE_PATH", pkg_path)
         if model_spec is None:
             model_spec = ModelSpecificValues(
                 template="qwen2-chat",
@@ -302,7 +298,9 @@ class EagleProcessor:
         )
         tokens_to_keep = ["<box>", "</box>", "<ref>", "</ref>"]
         tokenizer.additional_special_tokens = [
-            item for item in tokenizer.additional_special_tokens if item not in tokens_to_keep
+            item
+            for item in tokenizer.additional_special_tokens
+            if item not in tokens_to_keep
         ]
         self.tokenizer = tokenizer
         config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
@@ -323,7 +321,9 @@ class EagleProcessor:
 
     def scale_image_size_by(self, factor):
         self.image_size = int(self.image_size * factor)
-        self.model_spec.num_image_token = int(self.model_spec.num_image_token * factor**2)
+        self.model_spec.num_image_token = int(
+            self.model_spec.num_image_token * factor**2
+        )
         print(
             f"New image size: {self.image_size}, New num_image_token: {self.model_spec.num_image_token}"
         )
@@ -377,25 +377,31 @@ class EagleProcessor:
         if global_image_cnt == 1:
             question = question.replace("<image 1><image>\n", "<image>\n")
             history = [
-                [item[0].replace("<image 1><image>\n", "<image>\n"), item[1]] for item in history
+                [item[0].replace("<image 1><image>\n", "<image>\n"), item[1]]
+                for item in history
             ]
 
-        assert len(max_input_tile_list) == len(
-            pil_images
-        ), "The number of max_input_tile_list and pil_images should be the same."
+        assert len(max_input_tile_list) == len(pil_images), (
+            "The number of max_input_tile_list and pil_images should be the same."
+        )
 
-        transform = build_transform(input_size=self.image_size, norm_type=self.norm_type)
+        transform = build_transform(
+            input_size=self.image_size, norm_type=self.norm_type
+        )
         if len(pil_images) > 0:
             max_input_tiles_limited_by_contect = self.max_input_tiles
             while True:
                 image_tiles = []
-                for current_max_input_tiles, pil_image in zip(max_input_tile_list, pil_images):
+                for current_max_input_tiles, pil_image in zip(
+                    max_input_tile_list, pil_images
+                ):
                     if self.config.dynamic_image_size:
                         tiles = dynamic_preprocess(
                             pil_image,
                             image_size=self.image_size,
                             max_num=min(
-                                current_max_input_tiles, max_input_tiles_limited_by_contect
+                                current_max_input_tiles,
+                                max_input_tiles_limited_by_contect,
                             ),
                             use_thumbnail=self.config.use_thumbnail,
                         )
@@ -435,7 +441,9 @@ class EagleProcessor:
         return data
 
     def post_process(self, generation_output):
-        all_responses = self.tokenizer.batch_decode(generation_output, skip_special_tokens=True)
+        all_responses = self.tokenizer.batch_decode(
+            generation_output, skip_special_tokens=True
+        )
         return all_responses
 
     def collate_fn(self, all_examples):
