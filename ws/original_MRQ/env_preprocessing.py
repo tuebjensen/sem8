@@ -35,11 +35,14 @@ class Env:
         env_name: str,
         seed: int = 0,
         eval_env: bool = False,
+        eval_data_dir: str = "",
         remove_info: bool = True,
     ):
         env_type = env_name.split("-", 1)[0]
         self.env = globals()[f"{env_type}Preprocessing"](
-            env_name, seed, eval
+            env_name,
+            seed,
+            eval_env,
         )  # Calls the corresponding preprocessing class.
 
         # Copy instance variables
@@ -90,8 +93,34 @@ class Env:
         )
 
 
+class Sem8Preprocessing:
+    def __init__(
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        eval_data_dir: str = "",
+    ):
+        self.env = gym.make(
+            env_name.replace("Sem8-", ""),
+            render_mode="rgb_array",
+            eval=eval_env,
+            eval_data_dir=eval_data_dir,
+        )
+        self.offline = False
+        self.pixel_obs = False
+        self.obs_shape = self.env.observation_space.shape
+        self.history = 1
+
+
 class FrozenPreprocessing:
-    def __init__(self, env_name: str, seed: int = 0, eval_env: bool = False):
+    def __init__(
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        eval_data_dir: str = "",
+    ):
         desc = generate_random_map(size=8, seed=1)
         self.env = gym.make(env_name.replace("Frozen-", ""), desc=desc)
         self.env.reset(seed=seed)
@@ -120,7 +149,13 @@ class FrozenPreprocessing:
 
 
 class GymPreprocessing:
-    def __init__(self, env_name: str, seed: int = 0, eval_env: bool = False):
+    def __init__(
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        eval_data_dir: str = "",
+    ):
         self.env = gym.make(env_name.replace("Gym-", ""))
         self.env.reset(seed=seed)
 
@@ -153,7 +188,12 @@ class DmcHyperparameters:
 
 class DmcPreprocessing:
     def __init__(
-        self, env_name: str, seed: int = 0, eval_env: bool = False, hp: Dict = {}
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        hp: Dict = {},
+        eval_data_dir: str = "",
     ):
         from dm_control import suite
         from dm_control.suite.wrappers import action_scale
@@ -256,7 +296,12 @@ class AtariHyperparameters:
 
 class AtariPreprocessing:
     def __init__(
-        self, env_name: str, seed: int = 0, eval_env: bool = False, hp: Dict = {}
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        hp: Dict = {},
+        eval_data_dir: str = "",
     ):
         self.hp = AtariHyperparameters(**hp)
         utils.set_instance_vars(self.hp, self)
