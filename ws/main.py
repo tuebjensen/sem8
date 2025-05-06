@@ -14,8 +14,6 @@ import time
 
 import numpy as np
 import torch
-from torch.distributed import init_process_group
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 import original_MRQ.env_preprocessing as env_preprocessing
 import original_MRQ.MRQ as MRQ
@@ -40,15 +38,10 @@ class DefaultExperimentArguments:
         utils.enforce_dataclass_type(self)
 
 
-def ddp_setup() -> int:
-    init_process_group(backend="nccl")
-    device = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(device)
-    return device
-
-
 def main(args):
-    device = ddp_setup()
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
+    )
 
     default_arguments = DefaultExperimentArguments()
     env_type = args.env.split("-", 1)[0]
@@ -108,7 +101,6 @@ def main(args):
             env.discrete,
             device,
             env.history,
-            DDP=DDP,
         )
 
         logger = utils.Logger(f"{args.log_folder}/{args.project_name}.txt")
@@ -154,7 +146,7 @@ def main(args):
 class OnlineExperiment:
     def __init__(
         self,
-        agent: MRQ.Agent,
+        agent: object,
         env: object,
         eval_env: object,
         logger: object,
@@ -312,7 +304,6 @@ def load_experiment(
         device,
         env.history,
         dataclasses.asdict(agent_dict["hp"]),
-        DDP=DDP,
     )
     agent.load(f"{save_folder}/{project_name}")
 

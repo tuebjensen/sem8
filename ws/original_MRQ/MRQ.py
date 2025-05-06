@@ -89,7 +89,6 @@ class Agent:
         discrete: bool,
         device: torch.device,
         history: int = 1,
-        DDP=None,
         hp: Dict = {},
     ):
         self.name = "MR.Q"
@@ -98,9 +97,7 @@ class Agent:
         utils.set_instance_vars(self.hp, self)
         self.device = device
 
-        if (
-            discrete
-        ):  # Scale action noise since discrete actions are [0,1] and continuous actions are [-1,1].
+        if discrete:  # Scale action noise since discrete actions are [0,1] and continuous actions are [-1,1].
             self.exploration_noise *= 0.5
             self.noise_clip *= 0.5
             self.target_policy_noise *= 0.5
@@ -130,8 +127,6 @@ class Agent:
             self.enc_hdim,
             self.enc_activ,
         ).to(self.device)
-        if DDP is not None:
-            self.encoder = DDP(self.encoder, device_ids=[self.device])
         self.encoder_optimizer = torch.optim.AdamW(
             self.encoder.parameters(), lr=self.enc_lr, weight_decay=self.enc_wd
         )
@@ -145,8 +140,6 @@ class Agent:
             self.policy_hdim,
             self.policy_activ,
         ).to(self.device)
-        if DDP is not None:
-            self.policy = DDP(self.policy, device_ids=[self.device])
         self.policy_optimizer = torch.optim.AdamW(
             self.policy.parameters(), lr=self.policy_lr, weight_decay=self.policy_wd
         )
@@ -155,8 +148,6 @@ class Agent:
         self.value = models.Value(self.zsa_dim, self.value_hdim, self.value_activ).to(
             self.device
         )
-        if DDP is not None:
-            self.value = DDP(self.value, device_ids=[self.device])
         self.value_optimizer = torch.optim.AdamW(
             self.value.parameters(), lr=self.value_lr, weight_decay=self.value_wd
         )
@@ -266,9 +257,7 @@ class Agent:
         with torch.no_grad():
             encoder_target = self.encoder_target.zs(
                 next_state.reshape(-1, *self.state_shape)  # Combine batch and horizon
-            ).reshape(
-                state.shape[0], -1, self.zs_dim
-            )  # Separate batch and horizon
+            ).reshape(state.shape[0], -1, self.zs_dim)  # Separate batch and horizon
 
         pred_zs = self.encoder.zs(state[:, 0])
         prev_not_done = (
