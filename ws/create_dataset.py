@@ -7,7 +7,6 @@ import timeit
 
 import pygame
 from mazelib.generate.DungeonRooms import DungeonRooms
-from pygame import image
 from tqdm import tqdm
 
 
@@ -271,8 +270,10 @@ def main():
         categories = env._categories
         target_bbox_index = env._target_bbox_index
         agent_position = env._agent_position.tolist()
+        agent_angle = int(env._agent_angle)
         maze_rects = env._maze_rects
         maze_xywh = [(x, y, w, h) for x, y, w, h in maze_rects]
+        prompt = env._prompt
         validation_data.append(
             {
                 "image_file_name": image_file_name,
@@ -280,7 +281,9 @@ def main():
                 "categories": categories,
                 "target_bbox_index": target_bbox_index,
                 "agent_position": agent_position,
+                "agent_angle": agent_angle,
                 "maze_xywh": maze_xywh,
+                "prompt": prompt,
             }
         )
         # Save the image

@@ -4,6 +4,7 @@ import os
 import random
 import sys
 import timeit
+from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
@@ -52,6 +53,10 @@ class Sem8Env(gym.Env):
         self._agent_speed = 10
         self._agent_turn_speed = 15
         self._agent_radius = 15
+        self._eval = kwargs.get("eval", False)
+        self._eval_data_dir = kwargs.get("eval_data_dir", "")
+        self.is_last_eval_data = False
+        self._eval_data_generator = self._load_eval_data()
 
         self.action_space = spaces.Discrete(4)  # Forward, Left, Right, Pick up
         self.observation_space = spaces.Tuple(
@@ -126,12 +131,20 @@ class Sem8Env(gym.Env):
             bbox_rects.append(rect)
         return bbox_rects
 
-    def _draw_rects(self, surface, rects, color=(0, 255, 0), line_width=0):
+    def _draw_rects(
+        self,
+        surface: pygame.Surface,
+        rects: list[pygame.Rect],
+        color=(0, 255, 0),
+        line_width=0,
+    ):
+        # Returns new surface with maze rects drawn on it
+        surface_with_rects = surface.copy()
         for rect in rects:
-            pygame.draw.rect(surface, color, rect, line_width)
+            pygame.draw.rect(surface_with_rects, color, rect, line_width)
+        return surface_with_rects
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
-        super().reset(seed=seed, options=options)
+    def _generate_train_data(self):
         self._image, self._bbox_rects, self._categories = generate_image()
         self._width, self._height = self._image.get_size()
 
@@ -160,8 +173,63 @@ class Sem8Env(gym.Env):
             self._agent_position,
             self._agent_radius,
         )
+        self._prompt = "You are guiding a robot to pick up an object in a maze. "
+        self._prompt += "The robot is represented by a green circle with red line indicating the direction it's pointing in. "
+        self._prompt += (
+            "The maze is represented by either horizontal or vertical green lines. "
+        )
+        self._prompt += (
+            "The robot can move forward, turn left or right, and pick up the object. "
+        )
+        self._prompt += f"Your goal is to locate the {self._categories[self._target_bbox_index]} without hitting the maze."
+
+    def _load_eval_data(self):
+        print("Loading eval data from", self._eval_data_dir)
+        with open(os.path.join(self._eval_data_dir, "meta_data.json")) as f:
+            eval_meta_data = json.load(f)
+        while True:
+            for image_data in eval_meta_data:
+                image_name = image_data["image_file_name"]
+                image_path = os.path.join(self._eval_data_dir, image_name)
+                self._image = pygame.image.load(image_path)
+                self._width, self._height = self._image.get_size()
+                self.observation_space = spaces.Tuple(
+                    (
+                        DiscreteBoxSpace(self._width, self._height),  # agent position
+                        spaces.Discrete(360),  # angle
+                    )
+                )
+
+                self._bbox_rects = [pygame.Rect(bbox) for bbox in image_data["bboxes"]]
+                self._target_bbox_index = image_data["target_bbox_index"]
+                self._categories = image_data["categories"]
+                self._maze_rects = [
+                    pygame.Rect(maze_xywh) for maze_xywh in image_data["maze_xywh"]
+                ]
+
+                self._agent_position = np.array(
+                    image_data["agent_position"], dtype=np.float64
+                )
+                self._agent_angle = image_data["agent_angle"]
+                self._prompt = image_data["prompt"]
+                print(self._prompt)
+                # print("Goal is", self._categories[self._target_bbox_index])
+
+                yield
+
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
+        super().reset(seed=seed, options=options)
+        if self._eval:
+            try:
+                next(self._eval_data_generator)
+            except StopIteration:
+                self.is_last_eval_data = True
+        else:
+            self._generate_train_data()
         # self._draw_rects(self._image, self._bbox_rects, color=(255, 0, 0), line_width=2)
-        self._draw_rects(self._image, self._maze_rects, color=(0, 255, 0))
+        self._image_with_maze = self._draw_rects(
+            self._image, self._maze_rects, color=(0, 255, 0)
+        )
         # Sample returns integers, but we want floats for math purposes
         if self.render_mode == "human":
             self._render_frame()
@@ -209,19 +277,18 @@ class Sem8Env(gym.Env):
                     rect,
                 )
                 if maze_collided:
-                    pygame.draw.circle(
-                        self._image,
-                        (0, 0, 255),
-                        (coll_x, coll_y),
-                        3,
-                    )
+                    # pygame.draw.circle(
+                    #     self._image_with_maze,
+                    #     (0, 0, 255),
+                    #     (coll_x, coll_y),
+                    #     3,
+                    # )
                     break
 
             if not maze_collided:
                 self._agent_position[0] = new_x
                 self._agent_position[1] = new_y
 
-            # This might be redundant now
             self._agent_position[0:2] = np.clip(
                 self._agent_position[0:2],
                 [self._agent_radius, self._agent_radius],
@@ -263,8 +330,8 @@ class Sem8Env(gym.Env):
             self.clock = pygame.time.Clock()
 
         # render_surface = pygame.Surface((self._width, self._height))
-        render_surface = self._image.copy()
-        # render_surface.blit(self._image, (0, 0))
+        render_surface = self._image_with_maze.copy()
+        # render_surface.blit(self._image_with_maze, (0, 0))
         pygame.draw.circle(
             render_surface,
             (0, 255, 0),
@@ -309,13 +376,15 @@ gym.register(id="Sem8-v0", entry_point=Sem8Env)
 
 
 def main():
-    env = gym.make("Sem8-v0", render_mode="human")
-    observation, info = env.reset()
-    done = False
-    while not done:
-        action = env.action_space.sample()
-        observation, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
+    env = gym.make("Sem8-v0", render_mode="human", eval=True, eval_data_dir="test")
+
+    for i in range(10):
+        observation, info = env.reset()
+        done = False
+        while not done:
+            action = env.action_space.sample()
+            observation, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
 
         # print(observation, reward, terminated, truncated, info)
     env.close()
