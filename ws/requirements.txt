@@ -17,3 +17,4 @@ flash_attn==2.7.4.post1
 requests==2.32.3
 #:PIL
 peft==0.15.2
+gymnasium[mujoco]

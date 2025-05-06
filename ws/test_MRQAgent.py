@@ -80,25 +80,33 @@ def main():
         action_size=None,
         state_size=None,
         proba_frozen=0.9,
-        savefig_folder="./results/frozen_lake_1",
+        savefig_folder="./results/cheetah_1",
     )
     desc = generate_random_map(
         size=params.map_size, p=params.proba_frozen, seed=params.seed
     )
+    print("creating env")
     env = gym.make(
-        "FrozenLake-v1",
-        is_slippery=params.is_slippery,
-        render_mode="rgb_array",
-        desc=desc,
+        "HalfCheetah-v4",
     )
-    env = TimeLimit(env, max_episode_steps=100)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
     # agent = MRQAgent((1,), env.action_space.n, 1, device, 1)
-    agent = Agent((1,), env.action_space.n, 1, False, True, device, 1)
+    print("creating agent")
+    agent = Agent(
+        env.observation_space.shape,
+        env.action_space.shape[0],
+        env.action_space.high[0],
+        False,
+        False,
+        device,
+        1,
+    )
     experiment_runner = ExperimentRunner(agent, env, params)
+    print("running experiment")
     experiment_runner.run(params.total_episodes)
+    print("saving results")
     experiment_runner.save_results(params.savefig_folder)
     # for _ in range(100):
     #     state, _ = env.reset(seed=params.seed)
