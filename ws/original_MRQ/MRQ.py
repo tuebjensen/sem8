@@ -7,27 +7,26 @@
 
 import copy
 import dataclasses
+from time import perf_counter
 from typing import Dict
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-import original_MRQ.buffer as buffer
-import original_MRQ.models as models
-import original_MRQ.utils as utils
+from . import buffer, models, utils
 
 
 @dataclasses.dataclass
 class Hyperparameters:
     # Generic
     batch_size: int = 256
-    buffer_size: int = int(1e4)  # 1e6
+    buffer_size: int = int(1e6)  # 1e6
     discount: float = 0.99
     target_update_freq: int = 250
 
     # Exploration
-    buffer_size_before_training: int = int(1e2)  # 10e3
+    buffer_size_before_training: int = int(10e3)  # 10e3
     exploration_noise: float = 0.2
 
     # TD3
@@ -198,6 +197,7 @@ class Agent:
         self.training_steps += 1
 
         if (self.training_steps - 1) % self.target_update_freq == 0:
+            # time_start = perf_counter()
             self.policy_target.load_state_dict(self.policy.state_dict())
             self.value_target.load_state_dict(self.value.state_dict())
             self.encoder_target.load_state_dict(self.encoder.state_dict())
@@ -219,7 +219,8 @@ class Agent:
                     not_done,
                     self.replay_buffer.env_terminates,
                 )
-
+            # time_end = perf_counter()
+            # print("Encoder training time: ", time_end - time_start)
         state, action, next_state, reward, not_done = self.replay_buffer.sample(
             self.Q_horizon, include_intermediate=False
         )
@@ -227,7 +228,7 @@ class Agent:
             state, next_state, self.pixel_obs, self.pixel_augs
         )
         reward, term_discount = multi_step_reward(reward, not_done, self.discount)
-
+        # time_start = perf_counter()
         Q, Q_target = self.train_rl(
             state,
             action,
@@ -237,7 +238,8 @@ class Agent:
             self.reward_scale,
             self.target_reward_scale,
         )
-
+        # time_end = perf_counter()
+        # print("RL training time: ", (time_end - time_start) * self.target_update_freq)
         if self.prioritized:
             priority = (Q - Q_target.expand(-1, 2)).abs().max(1).values
             priority = priority.clamp(min=self.min_priority).pow(self.alpha)

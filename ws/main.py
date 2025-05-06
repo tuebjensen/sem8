@@ -14,9 +14,9 @@ import time
 import numpy as np
 import torch
 
-import env_preprocessing
-import MRQ
-import utils
+import original_MRQ.env_preprocessing as env_preprocessing
+import original_MRQ.MRQ as MRQ
+import original_MRQ.utils as utils
 
 
 @dataclasses.dataclass
@@ -27,50 +27,17 @@ class DefaultExperimentArguments:
     Dmc_total_timesteps: int = 5e5
     Dmc_eval_freq: int = 5e3
 
-    Gym_total_timesteps: int = 1e6
+    Gym_total_timesteps: int = 1e6  # 1e6
     Gym_eval_freq: int = 5e3
+
+    Frozen_total_timesteps: int = 7e5  # 1e6
+    Frozen_eval_freq: int = 5e3
 
     def __post_init__(self):
         utils.enforce_dataclass_type(self)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    # Experiment
-    parser.add_argument("--env", default="Gym-HalfCheetah-v4", type=str)
-    parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument(
-        "--total_timesteps", default=-1, type=int
-    )  # Uses default, input to override.
-    parser.add_argument("--device", default="cuda", type=str)
-    # Evaluation
-    parser.add_argument(
-        "--eval_freq", default=-1, type=int
-    )  # Uses default, input to override.
-    parser.add_argument("--eval_eps", default=10, type=int)
-    # File name and locations
-    parser.add_argument(
-        "--project_name", default="", type=str
-    )  # Uses default, input to override.
-    parser.add_argument("--eval_folder", default="./evals", type=str)
-    parser.add_argument("--log_folder", default="./logs", type=str)
-    parser.add_argument("--save_folder", default="./checkpoint", type=str)
-    # Experiment checkpointing
-    parser.add_argument(
-        "--save_experiment",
-        default=False,
-        action=argparse.BooleanOptionalAction,
-        type=bool,
-    )
-    parser.add_argument("--save_freq", default=1e5, type=int)
-    parser.add_argument(
-        "--load_experiment",
-        default=False,
-        action=argparse.BooleanOptionalAction,
-        type=bool,
-    )
-    args = parser.parse_args()
-
+def main(args):
     device = torch.device(
         "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
     )
@@ -208,7 +175,7 @@ class OnlineExperiment:
             ):
                 save_experiment(self)
 
-            action = self.agent.select_action(np.array(state))
+            action = self.agent.select_action(state)
             if action is None:
                 action = self.env.action_space.sample()
 
@@ -255,7 +222,7 @@ class OnlineExperiment:
         self.logger.title(
             f"Evaluation at {self.t} time steps\n"
             f"Average total reward over {self.eval_eps} episodes: {total_reward.mean():.3f}\n"
-            f"Total time passed: {round((time.time() - self.start_time + self.time_passed)/60., 2)} minutes"
+            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes"
         )
 
         np.savetxt(
@@ -320,7 +287,7 @@ def load_experiment(
     agent.load(f"{save_folder}/{project_name}")
 
     logger = utils.Logger(f"{args.log_folder}/{args.project_name}.txt")
-    logger.title("Loaded experiment\n" f'Starting from: {exp_dict["t"]} time steps.')
+    logger.title(f"Loaded experiment\nStarting from: {exp_dict['t']} time steps.")
 
     return OnlineExperiment(
         agent,
@@ -342,8 +309,43 @@ def load_experiment(
 
 
 def modify_parser(parser):
-    pass
+    # Experiment
+    parser.add_argument("--env", default="Gym-HalfCheetah-v4", type=str)
+    parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument(
+        "--total_timesteps", default=-1, type=int
+    )  # Uses default, input to override.
+    parser.add_argument("--device", default="cuda", type=str)
+    # Evaluation
+    parser.add_argument(
+        "--eval_freq", default=-1, type=int
+    )  # Uses default, input to override.
+    parser.add_argument("--eval_eps", default=10, type=int)
+    # File name and locations
+    parser.add_argument(
+        "--project_name", default="", type=str
+    )  # Uses default, input to override.
+    parser.add_argument("--eval_folder", default="./evals", type=str)
+    parser.add_argument("--log_folder", default="./logs", type=str)
+    parser.add_argument("--save_folder", default="./checkpoint", type=str)
+    # Experiment checkpointing
+    parser.add_argument(
+        "--save_experiment",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        type=bool,
+    )
+    parser.add_argument("--save_freq", default=1e5, type=int)
+    parser.add_argument(
+        "--load_experiment",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        type=bool,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    modify_parser(parser)
+    args = parser.parse_args()
+    main(args)

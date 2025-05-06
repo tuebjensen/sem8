@@ -5,15 +5,17 @@
 # LICENSE file in the root directory of this source tree.
 
 
-from collections import deque
 import dataclasses
+import numbers
+from collections import deque
 from functools import partial
 from typing import Dict
 
 import gymnasium as gym
 import numpy as np
+from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 
-import utils
+from . import utils
 
 # Used by Atari
 # import ale_py
@@ -28,12 +30,27 @@ import utils
 # 2. Unifies some basic attributes like action_dim, obs_shape.
 # 3. Tracks some basic information like episode timesteps and reward.
 class Env:
-    def __init__(self, env_name: str, seed: int=0, eval_env: bool=False, remove_info: bool=True):
-        env_type = env_name.split('-',1)[0]
-        self.env = globals()[f'{env_type}Preprocessing'](env_name, seed, eval) # Calls the corresponding preprocessing class.
+    def __init__(
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        remove_info: bool = True,
+    ):
+        env_type = env_name.split("-", 1)[0]
+        self.env = globals()[f"{env_type}Preprocessing"](
+            env_name, seed, eval
+        )  # Calls the corresponding preprocessing class.
 
         # Copy instance variables
-        for k in ['offline', 'pixel_obs', 'obs_shape', 'history', 'max_ep_timesteps', 'action_space']:
+        for k in [
+            "offline",
+            "pixel_obs",
+            "obs_shape",
+            "history",
+            "max_ep_timesteps",
+            "action_space",
+        ]:
             self.__dict__[k] = self.env.__dict__[k]
 
         # Only used for printing
@@ -41,15 +58,16 @@ class Env:
         self.seed = seed
 
         self.action_space.seed(seed)
-        self.discrete = self.action_space.__class__.__name__ == 'Discrete'
-        self.action_dim = self.action_space.n if self.discrete else self.action_space.shape[0]
+        self.discrete = self.action_space.__class__.__name__ == "Discrete"
+        self.action_dim = (
+            self.action_space.n if self.discrete else self.action_space.shape[0]
+        )
         self.max_action = 1 if self.discrete else float(self.action_space.high[0])
 
         self.remove_info = remove_info
         self.ep_total_reward = 0
         self.ep_timesteps = 0
         self.ep_num = 1
-
 
     def reset(self):
         self.ep_total_reward = 0
@@ -59,19 +77,51 @@ class Env:
         state, info = self.env.reset()
         return state if self.remove_info else (state, info)
 
-
     def step(self, action: int | float):
         next_state, reward, terminated, truncated, info = self.env.step(action)
 
         self.ep_total_reward += reward
         self.ep_timesteps += 1
 
-        return (next_state, reward, terminated, truncated) if self.remove_info else (next_state, reward, terminated, truncated, info)
+        return (
+            (next_state, reward, terminated, truncated)
+            if self.remove_info
+            else (next_state, reward, terminated, truncated, info)
+        )
+
+
+class FrozenPreprocessing:
+    def __init__(self, env_name: str, seed: int = 0, eval_env: bool = False):
+        desc = generate_random_map(size=8, seed=1)
+        self.env = gym.make(env_name.replace("Frozen-", ""), desc=desc)
+        self.env.reset(seed=seed)
+
+        self.offline = False
+        self.pixel_obs = False
+        self.obs_shape = self.env.observation_space.shape
+        if len(self.obs_shape) == 0:
+            self.obs_shape = (1,)
+        self.history = 1
+        self.max_ep_timesteps = self.env.spec.max_episode_steps
+        self.action_space = self.env.action_space
+
+    def step(self, action: int | float):
+        next_state, reward, terminated, truncated, info = self.env.step(action)
+        if isinstance(next_state, numbers.Number):
+            next_state = np.array([next_state])
+
+        return next_state, reward, terminated, truncated, info
+
+    def reset(self):
+        state, info = self.env.reset()
+        if isinstance(state, numbers.Number):
+            state = np.array([state])
+        return state, info
 
 
 class GymPreprocessing:
-    def __init__(self, env_name: str, seed: int=0, eval_env: bool=False):
-        self.env = gym.make(env_name.replace('Gym-', ''))
+    def __init__(self, env_name: str, seed: int = 0, eval_env: bool = False):
+        self.env = gym.make(env_name.replace("Gym-", ""))
         self.env.reset(seed=seed)
 
         self.offline = False
@@ -81,10 +131,8 @@ class GymPreprocessing:
         self.max_ep_timesteps = self.env.spec.max_episode_steps
         self.action_space = self.env.action_space
 
-
     def step(self, action: int | float):
         return self.env.step(action)
-
 
     def reset(self):
         return self.env.reset()
@@ -96,27 +144,39 @@ class DmcHyperparameters:
     # Proprioceptive tasks only
     history: int = 1
     # Visual tasks only
-    visual_history: int = 3 # Overrides history.
+    visual_history: int = 3  # Overrides history.
     image_size: int = 84
 
-    def __post_init__(self): utils.enforce_dataclass_type(self)
+    def __post_init__(self):
+        utils.enforce_dataclass_type(self)
 
 
 class DmcPreprocessing:
-    def __init__(self, env_name: str, seed: int=0, eval_env: bool=False, hp: Dict={}):
+    def __init__(
+        self, env_name: str, seed: int = 0, eval_env: bool = False, hp: Dict = {}
+    ):
         from dm_control import suite
         from dm_control.suite.wrappers import action_scale
+
         self.hp = DmcHyperparameters(**hp)
         utils.set_instance_vars(self.hp, self)
 
-        self.pixel_obs = '-visual' in env_name
-        self.domain, task = env_name.replace('Dmc-', '').replace('visual-', '').split('-', 1)
-        self.env = suite.load(self.domain, task, task_kwargs={'random': seed}, visualize_reward=False)
-        self.env = action_scale.Wrapper(self.env, minimum=-1., maximum=1.)
+        self.pixel_obs = "-visual" in env_name
+        self.domain, task = (
+            env_name.replace("Dmc-", "").replace("visual-", "").split("-", 1)
+        )
+        self.env = suite.load(
+            self.domain, task, task_kwargs={"random": seed}, visualize_reward=False
+        )
+        self.env = action_scale.Wrapper(self.env, minimum=-1.0, maximum=1.0)
         self.offline = False
 
         if self.pixel_obs:
-            self.obs_shape = (3, self.image_size, self.image_size) # The first dim (3) is color channels (RGB).
+            self.obs_shape = (
+                3,
+                self.image_size,
+                self.image_size,
+            )  # The first dim (3) is color channels (RGB).
             self.history = self.visual_history
         else:
             self.obs_shape = 0
@@ -130,15 +190,15 @@ class DmcPreprocessing:
         self.action_space = gym.spaces.Box(
             low=-np.ones(self.env.action_spec().shape),
             high=np.ones(self.env.action_spec().shape),
-            dtype=self.env.action_spec().dtype)
+            dtype=self.env.action_spec().dtype,
+        )
 
         self.history_queue = deque(maxlen=self.history)
 
-
     def get_obs(self, time_step: object):
-        if self.pixel_obs: return self.render(self.image_size)
+        if self.pixel_obs:
+            return self.render(self.image_size)
         return np.concatenate([v.flatten() for v in time_step.observation.values()])
-
 
     def reset(self):
         self.t = 0
@@ -150,10 +210,9 @@ class DmcPreprocessing:
 
         return np.concatenate(self.history_queue), {}
 
-
     def step(self, action: float):
         self.t += 1
-        action = action.astype(np.float32) # This shouldn't matter but it can.
+        action = action.astype(np.float32)  # This shouldn't matter but it can.
 
         reward = 0.0
         for _ in range(self.action_repeat):
@@ -162,10 +221,15 @@ class DmcPreprocessing:
 
         obs = self.get_obs(time_step)
         self.history_queue.append(obs)
-        return np.concatenate(self.history_queue), reward, False, self.t == self.max_ep_timesteps, {}
+        return (
+            np.concatenate(self.history_queue),
+            reward,
+            False,
+            self.t == self.max_ep_timesteps,
+            {},
+        )
 
-
-    def render(self, size: int=84, camera_id: int=0):
+    def render(self, size: int = 84, camera_id: int = 0):
         camera_id = dict(quadruped=2).get(self.domain, camera_id)
         return self.env.physics.render(size, size, camera_id).transpose(2, 0, 1)
 
@@ -173,7 +237,9 @@ class DmcPreprocessing:
 @dataclasses.dataclass
 class AtariHyperparameters:
     history: int = 4
-    training_reward_clipping: bool = False # Only applied during training / not on eval environment.
+    training_reward_clipping: bool = (
+        False  # Only applied during training / not on eval environment.
+    )
     max_ep_frames: int = 108e3
     max_noops: int = 0
     action_repeat: int = 4
@@ -184,26 +250,31 @@ class AtariHyperparameters:
     sticky_actions: bool = True
     eval_eps: float = 1e-3
 
-    def __post_init__(self): utils.enforce_dataclass_type(self)
+    def __post_init__(self):
+        utils.enforce_dataclass_type(self)
 
 
 class AtariPreprocessing:
-    def __init__(self, env_name: str, seed: int=0, eval_env: bool=False, hp: Dict={}):
+    def __init__(
+        self, env_name: str, seed: int = 0, eval_env: bool = False, hp: Dict = {}
+    ):
         self.hp = AtariHyperparameters(**hp)
         utils.set_instance_vars(self.hp, self)
 
         # Only needed for Gymnasium >= 1.0.0
         import ale_py
+
         gym.register_envs(ale_py)
 
         import cv2
+
         self.resize = partial(cv2.resize, interpolation=cv2.INTER_AREA)
 
         self.env = gym.make(
-            env_name.replace('Atari-','ALE/'),
+            env_name.replace("Atari-", "ALE/"),
             frameskip=1,
-            obs_type='grayscale' if self.grayscale else 'rgb',
-            repeat_action_probability=0.25 if self.sticky_actions else 0
+            obs_type="grayscale" if self.grayscale else "rgb",
+            repeat_action_probability=0.25 if self.sticky_actions else 0,
         )
         self.env.reset(seed=seed)
         self.offline = False
@@ -218,7 +289,6 @@ class AtariPreprocessing:
         self.history_queue = deque(maxlen=self.history)
         self.eval = eval
 
-
     def get_obs(self):
         if self.action_repeat > 1 and self.pool_frames:
             pool = np.maximum(self.pool_queue[0], self.pool_queue[1])
@@ -228,7 +298,6 @@ class AtariPreprocessing:
         obs = self.resize(pool, (self.image_size, self.image_size))
         return np.asarray(obs, dtype=np.uint8).reshape(self.obs_shape)
 
-
     def reset(self):
         self.frames = 0
         obs, info = self.env.reset()
@@ -236,7 +305,8 @@ class AtariPreprocessing:
         if self.max_noops > 0:
             for _ in range(np.random.randint(self.max_noops)):
                 obs, _, terminal, truncated, info = self.env.step(0)
-                if terminal or truncated: obs, info = self.env.reset()
+                if terminal or truncated:
+                    obs, info = self.env.reset()
 
         self.lives = self.env.unwrapped.ale.lives()
         for _ in range(2):
@@ -248,10 +318,9 @@ class AtariPreprocessing:
 
         return np.concatenate(self.history_queue), info
 
-
     def step(self, action: int):
         # If evaluation env: somtimes sample actions randomly.
-        if self.eval and np.random.uniform(0,1) < self.eval_eps:
+        if self.eval and np.random.uniform(0, 1) < self.eval_eps:
             action = self.action_space.sample()
 
         reward = 0.0
@@ -272,4 +341,10 @@ class AtariPreprocessing:
 
         obs = self.get_obs()
         self.history_queue.append(obs)
-        return np.concatenate(self.history_queue), reward, terminal, self.frames == self.max_ep_frames, info
+        return (
+            np.concatenate(self.history_queue),
+            reward,
+            terminal,
+            self.frames == self.max_ep_frames,
+            info,
+        )
