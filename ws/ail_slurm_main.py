@@ -27,6 +27,22 @@ if __name__ == "__main__":
             # directory to avoid storage limit issues on the /tmp directory
             env=(dict(os.environ) | {"TMPDIR": "../pip-cache"}),
         )
+        if os.path.exists("requirements2.txt"):
+            print("Installing requirements2.txt too...")
+            subprocess.call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--no-cache-dir",
+                    "-r",
+                    "requirements2.txt",
+                ],
+                # set the TMPDIR environment variable to a directory in the current
+                # directory to avoid storage limit issues on the /tmp directory
+                env=(dict(os.environ) | {"TMPDIR": "../pip-cache"}),
+            )
 
     import torch
 
