@@ -34,13 +34,11 @@ class EagleBackbone(nn.Module):
             "eagle2_hg_model", trust_remote_code=True
         )
         self.model = AutoModel.from_config(self.config, trust_remote_code=True)
-        self.pooler = nn.AdaptiveAvgPool1d(1).to(device)
         self.reduce_model()
         self.load_weights()
         self.freeze_and_eval()
         self.device = device
         self.model.to(device)
-        self.projector = torch.nn.Linear(2048, 1024).to(device)
         self.processor = EagleProcessor(
             model_path="eagle2_hg_model", max_input_tiles=1, model_spec=None
         )
@@ -166,12 +164,6 @@ class EagleBackbone(nn.Module):
             attention_mask=inputs["attention_mask"],
             img_context_token_id=self.img_context_token_id,
         )
-        embeddings = self.projector(embeddings)
-        # Note: pooling was not done originally in GR00T since they use cross-attention.
-        # However, we plan to use it as input to an MLP so we need to reduce the sequence dimension in some way
-        # Embeddings have shape (B, N, C) but the pooler requires (B, C, N)
-        # Squeeze the sequence dimension to get (B, C)
-        embeddings = self.pooler(embeddings.transpose(-1, -2)).squeeze(-1)
         return embeddings
 
 
@@ -190,7 +182,7 @@ class DefaultExperimentArguments:
     Frozen_eval_freq: int = 5e3
 
     Sem8_total_timesteps: int = 1e6  # 1e6
-    Sem8_eval_freq: int = 5e2  # 5e3
+    Sem8_eval_freq: int = 5e3  # 5e3
 
     def __post_init__(self):
         utils.enforce_dataclass_type(self)
@@ -329,7 +321,6 @@ class OnlineExperiment:
         self.evals = evals
 
         self.logger = logger
-
         self.t = t
         self.time_passed = time_passed
         self.start_time = time.time()
@@ -348,20 +339,14 @@ class OnlineExperiment:
 
     def run(self):
         state = self.env.reset()
-        times = []
         while self.t <= self.total_timesteps:
-            # self.maybe_evaluate()
+            self.maybe_evaluate()
             if (
                 self.save_full
                 and self.t % self.save_freq == 0
                 and not self.init_timestep
             ):
                 save_experiment(self)
-            if self.t % 1000 == 0:
-                if len(times) > 0:
-                    print(sum(times) / len(times))
-                times = []
-            time_start = time.perf_counter()
             action = self.agent.select_action(state)
             if action is None:
                 action = self.env.action_space.sample()
@@ -385,7 +370,6 @@ class OnlineExperiment:
 
             self.t += 1
             self.init_timestep = False
-            times.append(time.perf_counter() - time_start)
 
     def maybe_evaluate(self):
         if self.t % self.eval_freq != 0:

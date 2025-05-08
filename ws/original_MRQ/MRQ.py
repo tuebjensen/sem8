@@ -20,8 +20,8 @@ from . import buffer, models, utils
 @dataclasses.dataclass
 class Hyperparameters:
     # Generic
-    batch_size: int = 256
-    buffer_size: int = int(1e6)  # 1e6
+    batch_size: int = 256  # 256
+    buffer_size: int = int(1e5)  # 1e6
     discount: float = 0.99
     target_update_freq: int = 250
 

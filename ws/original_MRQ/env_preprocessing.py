@@ -94,13 +94,15 @@ class Env:
 
 
 class Sem8Preprocessing:
-    def __init__(self, env_name: str, seed: int = 0, eval_env: bool = False, **kwargs):
+    def __init__(
+        self,
+        env_name: str,
+        seed: int = 0,
+        eval_env: bool = False,
+        eval_data_dir: str = "",
+        model: object = None,
+    ):
         # kwargs should contain "eval_data_dir" (where to find the eval data) and "model" (the VLM for embedding image and instruction)
-        assert "eval_data_dir" in kwargs, "eval_data_dir should be provided in kwargs"
-        assert "model" in kwargs, "model should be provided in kwargs"
-        eval_data_dir = kwargs["eval_data_dir"]
-        model = kwargs["model"]
-
         self.env = gym.make(
             env_name.replace("Sem8-", "", 1),
             render_mode="rgb_array",
@@ -111,8 +113,9 @@ class Sem8Preprocessing:
         self.pixel_obs = False
         self.eval_env = eval_env
         self.obs_shape = (
-            3 + 1024,
+            3 + 97 * 2048,
         )  # 3 for robot state (x,y,theta), 1024 for task embedding
+        # (5,3,2)
         self.history = 1
         self.action_space = self.env.action_space
         self.max_ep_timesteps = self.env.spec.max_episode_steps
@@ -161,14 +164,11 @@ class Sem8Preprocessing:
         ]
         inputs = self.model.prepare_message(message)
         # Get the task embedding from the model
-        task_embedding = None
-        if self.eval_env:
-            with torch.no_grad():
-                task_embedding = self.model(inputs).squeeze(0).cpu().numpy()
-        else:
-            task_embedding = self.model(inputs).squeeze(0).cpu().numpy()
+        task_embedding = self.model(inputs).squeeze(0).cpu().numpy()
         # Concatenate the robot state and task embedding
-        state = np.concatenate((self.flatten_state(state), task_embedding), axis=0)
+        state = np.concatenate(
+            (self.flatten_state(state), task_embedding.flatten()), axis=0
+        )
         return state
 
     def step(self, action: int | float):
@@ -189,7 +189,7 @@ class FrozenPreprocessing:
         env_name: str,
         seed: int = 0,
         eval_env: bool = False,
-        eval_data_dir: str = "",
+        **kwargs,
     ):
         desc = generate_random_map(size=8, seed=1)
         self.env = gym.make(env_name.replace("Frozen-", ""), desc=desc)
@@ -224,7 +224,7 @@ class GymPreprocessing:
         env_name: str,
         seed: int = 0,
         eval_env: bool = False,
-        eval_data_dir: str = "",
+        **kwargs,
     ):
         self.env = gym.make(env_name.replace("Gym-", ""))
         self.env.reset(seed=seed)
@@ -263,7 +263,7 @@ class DmcPreprocessing:
         seed: int = 0,
         eval_env: bool = False,
         hp: Dict = {},
-        eval_data_dir: str = "",
+        **kwargs,
     ):
         from dm_control import suite
         from dm_control.suite.wrappers import action_scale

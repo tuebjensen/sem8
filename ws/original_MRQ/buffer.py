@@ -32,7 +32,7 @@ class ReplayBuffer:
         self.batch_size = batch_size
 
         self.obs_shape = obs_shape  # Size of individual frames.
-        self.obs_dtype = torch.uint8 if pixel_obs else torch.float
+        self.obs_dtype = torch.uint8 if pixel_obs else torch.bfloat16
 
         # Size of state given to network
         self.state_shape = [obs_shape[0] * history]  # Channels or obs dim.
