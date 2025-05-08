@@ -16,6 +16,7 @@ import numpy as np
 import pygame
 import torch
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
+from gymnasium.wrappers import TimeLimit
 
 from . import utils
 
@@ -103,11 +104,14 @@ class Sem8Preprocessing:
         model: object = None,
     ):
         # kwargs should contain "eval_data_dir" (where to find the eval data) and "model" (the VLM for embedding image and instruction)
-        self.env = gym.make(
-            env_name.replace("Sem8-", "", 1),
-            render_mode="rgb_array",
-            eval=eval_env,
-            eval_data_dir=eval_data_dir,
+        self.env = TimeLimit(
+            gym.make(
+                env_name.replace("Sem8-", "", 1),
+                render_mode="rgb_array",
+                eval=eval_env,
+                eval_data_dir=eval_data_dir,
+            ),
+            max_episode_steps=1000,
         )
         self.offline = False
         self.pixel_obs = False

@@ -256,9 +256,9 @@ def main():
     import Sem8Env
 
     env = Sem8Env.Sem8Env()
-    n_images = 10
+    n_images = 50
     validation_data = []
-    data_dir = "test"
+    data_dir = "validation"
     for i in tqdm(range(n_images)):
         env.reset()
         image_file_name = f"val_image_{i}.png"

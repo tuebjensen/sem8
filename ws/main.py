@@ -228,6 +228,7 @@ def main(args):
             with open(os.path.join(eval_data_folder_path, "meta_data.json"), "r") as f:
                 meta_data = json.load(f)
             eval_eps = len(meta_data)
+            model = EagleBackbone(device)
 
         env = env_preprocessing.Env(
             args.env,

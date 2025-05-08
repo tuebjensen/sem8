@@ -3,7 +3,7 @@ import math
 import os
 import random
 import sys
-import timeit
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,7 @@ import gymnasium as gym
 import numpy as np
 import pygame
 from gymnasium import spaces
+from gymnasium.wrappers import TimeLimit
 from mazelib import Maze
 
 from create_dataset import generate_image, generate_maze
@@ -295,7 +296,7 @@ class Sem8Env(gym.Env):
                 self._bbox_rects[self._target_bbox_index],
             )
 
-            reward = 5 if correct_pick_up else -5
+            reward = 10 if correct_pick_up else -0.1
             terminated = correct_pick_up
 
         if self.render_mode == "human":
@@ -366,15 +367,22 @@ gym.register(id="Sem8-v0", entry_point=Sem8Env)
 
 
 def main():
-    env = gym.make("Sem8-v0", render_mode="human", eval=True, eval_data_dir="test")
+    env = TimeLimit(
+        gym.make("Sem8-v0", render_mode="human", eval=True, eval_data_dir="test"),
+        max_episode_steps=1000,
+    )
     for i in range(10):
         observation, info = env.reset()
         done = False
+        t = 0
         while not done:
+            t += 1
+            if t % 100 == 0:
+                print("Step", t)
             action = env.action_space.sample()
             observation, reward, terminated, truncated, info = env.step(action)
+            time_end = time.perf_counter()
             done = terminated or truncated
-            print(observation)
 
         # print(observation, reward, terminated, truncated, info)
     env.close()
