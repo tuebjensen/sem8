@@ -9,10 +9,12 @@ import dataclasses
 import numbers
 from collections import deque
 from functools import partial
-from typing import Dict
+from typing import Dict, Iterable, TypedDict, Unpack
 
 import gymnasium as gym
 import numpy as np
+import pygame
+import torch
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 
 from . import utils
@@ -35,14 +37,12 @@ class Env:
         env_name: str,
         seed: int = 0,
         eval_env: bool = False,
-        eval_data_dir: str = "",
         remove_info: bool = True,
+        **kwargs,
     ):
         env_type = env_name.split("-", 1)[0]
         self.env = globals()[f"{env_type}Preprocessing"](
-            env_name,
-            seed,
-            eval_env,
+            env_name, seed, eval_env, **kwargs
         )  # Calls the corresponding preprocessing class.
 
         # Copy instance variables
@@ -94,23 +94,93 @@ class Env:
 
 
 class Sem8Preprocessing:
-    def __init__(
-        self,
-        env_name: str,
-        seed: int = 0,
-        eval_env: bool = False,
-        eval_data_dir: str = "",
-    ):
+    def __init__(self, env_name: str, seed: int = 0, eval_env: bool = False, **kwargs):
+        # kwargs should contain "eval_data_dir" (where to find the eval data) and "model" (the VLM for embedding image and instruction)
+        assert "eval_data_dir" in kwargs, "eval_data_dir should be provided in kwargs"
+        assert "model" in kwargs, "model should be provided in kwargs"
+        eval_data_dir = kwargs["eval_data_dir"]
+        model = kwargs["model"]
+
         self.env = gym.make(
-            env_name.replace("Sem8-", ""),
+            env_name.replace("Sem8-", "", 1),
             render_mode="rgb_array",
             eval=eval_env,
             eval_data_dir=eval_data_dir,
         )
         self.offline = False
         self.pixel_obs = False
-        self.obs_shape = self.env.observation_space.shape
+        self.eval_env = eval_env
+        self.obs_shape = (
+            3 + 1024,
+        )  # 3 for robot state (x,y,theta), 1024 for task embedding
         self.history = 1
+        self.action_space = self.env.action_space
+        self.max_ep_timesteps = self.env.spec.max_episode_steps
+        self.model = model
+
+        self.system_message = "You are guiding a robot to pick up an object in a maze. "
+        self.system_message += "The robot is represented by a green circle with red line indicating the direction it's pointing in. "
+        self.system_message += (
+            "The maze is represented by either horizontal or vertical green lines. "
+        )
+        self.system_message += (
+            "The robot can move forward, turn left or right, and pick up the object. "
+        )
+        self.system_message += (
+            "Your goal is to avoid hitting the maze while navigating to the object."
+        )
+
+    def flatten_state(self, state):
+        flattened_state = []
+
+        def _flatten_state(state):
+            # Flatten the robot state tuple into a single array
+            for s in state:
+                if isinstance(s, Iterable):
+                    _flatten_state(s)
+                else:
+                    flattened_state.append(s)
+
+        _flatten_state(state)
+        return np.array(flattened_state, dtype=np.float32)
+
+    def augment_state(self, state, info):
+        image_surface = info["image"]
+        image = np.transpose(
+            np.array(pygame.surfarray.pixels3d(image_surface)), axes=(1, 0, 2)
+        )
+        prompt = info["prompt"]
+
+        message = [
+            {"role": "system", "content": self.system_message},
+            {
+                "role": "user",
+                "image": [{"np_array": image}],
+                "content": prompt,
+            },
+        ]
+        inputs = self.model.prepare_message(message)
+        # Get the task embedding from the model
+        task_embedding = None
+        if self.eval_env:
+            with torch.no_grad():
+                task_embedding = self.model(inputs).squeeze(0).cpu().numpy()
+        else:
+            task_embedding = self.model(inputs).squeeze(0).cpu().numpy()
+        # Concatenate the robot state and task embedding
+        state = np.concatenate((self.flatten_state(state), task_embedding), axis=0)
+        return state
+
+    def step(self, action: int | float):
+        next_state, reward, terminated, truncated, info = self.env.step(action)
+        next_state = self.augment_state(next_state, info)
+
+        return next_state, reward, terminated, truncated, info
+
+    def reset(self):
+        state, info = self.env.reset()
+        state = self.augment_state(state, info)
+        return state, info
 
 
 class FrozenPreprocessing:

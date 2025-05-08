@@ -17,7 +17,7 @@ from create_dataset import generate_image, generate_maze
 
 
 class DiscreteBoxSpace(spaces.Space):
-    def __init__(self, width, height, shape=None, dtype=np.int64):
+    def __init__(self, width, height, shape=(2,), dtype=np.int64):
         super().__init__(shape=shape, dtype=dtype)
         self._width = width
         self._height = height
@@ -85,9 +85,7 @@ class Sem8Env(gym.Env):
         )
 
     def _get_info(self):
-        return {
-            "image": self._image,
-        }
+        return {"image": self._image, "prompt": self._prompt}
 
     def _load_random_image_bbox(self):
         image_object = random.choice(self._annotation_dict["images"])
@@ -173,15 +171,7 @@ class Sem8Env(gym.Env):
             self._agent_position,
             self._agent_radius,
         )
-        self._prompt = "You are guiding a robot to pick up an object in a maze. "
-        self._prompt += "The robot is represented by a green circle with red line indicating the direction it's pointing in. "
-        self._prompt += (
-            "The maze is represented by either horizontal or vertical green lines. "
-        )
-        self._prompt += (
-            "The robot can move forward, turn left or right, and pick up the object. "
-        )
-        self._prompt += f"Your goal is to locate the {self._categories[self._target_bbox_index]} without hitting the maze."
+        self._prompt = f"Your goal is to locate and pick up the {self._categories[self._target_bbox_index]}."
 
     def _load_eval_data(self):
         print("Loading eval data from", self._eval_data_dir)
@@ -212,7 +202,7 @@ class Sem8Env(gym.Env):
                 )
                 self._agent_angle = image_data["agent_angle"]
                 self._prompt = image_data["prompt"]
-                print(self._prompt)
+                # print(self._prompt)
                 # print("Goal is", self._categories[self._target_bbox_index])
 
                 yield
@@ -257,7 +247,7 @@ class Sem8Env(gym.Env):
         return collided, coll_x, coll_y
 
     def step(self, action):
-        reward = -1
+        reward = -0.01
         terminated = False
         if action == 0:
             # Go forward
@@ -377,7 +367,6 @@ gym.register(id="Sem8-v0", entry_point=Sem8Env)
 
 def main():
     env = gym.make("Sem8-v0", render_mode="human", eval=True, eval_data_dir="test")
-
     for i in range(10):
         observation, info = env.reset()
         done = False
@@ -385,6 +374,7 @@ def main():
             action = env.action_space.sample()
             observation, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+            print(observation)
 
         # print(observation, reward, terminated, truncated, info)
     env.close()

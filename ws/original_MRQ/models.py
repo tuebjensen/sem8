@@ -15,9 +15,10 @@ import torch.nn.functional as F
 
 def weight_init(layer: torch.nn.modules):
     if isinstance(layer, (nn.Linear, nn.Conv2d)):
-        gain = nn.init.calculate_gain('relu')
+        gain = nn.init.calculate_gain("relu")
         nn.init.xavier_uniform_(layer.weight.data, gain)
-        if hasattr(layer.bias, 'data'): layer.bias.data.fill_(0.0)
+        if hasattr(layer.bias, "data"):
+            layer.bias.data.fill_(0.0)
 
 
 def ln_activ(x: torch.Tensor, activ: Callable):
@@ -26,7 +27,7 @@ def ln_activ(x: torch.Tensor, activ: Callable):
 
 
 class BaseMLP(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, hdim: int, activ: str='elu'):
+    def __init__(self, input_dim: int, output_dim: int, hdim: int, activ: str = "elu"):
         super().__init__()
         self.l1 = nn.Linear(input_dim, hdim)
         self.l2 = nn.Linear(hdim, hdim)
@@ -35,7 +36,6 @@ class BaseMLP(nn.Module):
         self.activ = getattr(F, activ)
         self.apply(weight_init)
 
-
     def forward(self, x: torch.Tensor):
         y = ln_activ(self.l1(x), self.activ)
         y = ln_activ(self.l2(y), self.activ)
@@ -43,8 +43,18 @@ class BaseMLP(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, state_dim: int, action_dim: int, pixel_obs: bool,
-        num_bins: int=65, zs_dim: int=512, za_dim: int=256, zsa_dim: int=512, hdim: int=512, activ: str='elu'):
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        pixel_obs: bool,
+        num_bins: int = 65,
+        zs_dim: int = 512,
+        za_dim: int = 256,
+        zsa_dim: int = 512,
+        hdim: int = 512,
+        activ: str = "elu",
+    ):
         super().__init__()
         if pixel_obs:
             self.zs = self.cnn_zs
@@ -66,44 +76,52 @@ class Encoder(nn.Module):
         self.activ = getattr(F, activ)
         self.apply(weight_init)
 
-
     def forward(self, zs: torch.Tensor, action: torch.Tensor):
         za = self.activ(self.za(action))
         return self.zsa(torch.cat([zs, za], 1))
 
-
     def model_all(self, zs: torch.Tensor, action: torch.Tensor):
         zsa = self.forward(zs, action)
         dzr = self.model(zsa)
-        return dzr[:,0:1], dzr[:,1:self.zs_dim+1], dzr[:,self.zs_dim+1:] # done, zs, reward
-
+        return (
+            dzr[:, 0:1],
+            dzr[:, 1 : self.zs_dim + 1],
+            dzr[:, self.zs_dim + 1 :],
+        )  # done, zs, reward
 
     def cnn_zs(self, state: torch.Tensor):
-        state = state/255. - 0.5
+        state = state / 255.0 - 0.5
         zs = self.activ(self.zs_cnn1(state))
         zs = self.activ(self.zs_cnn2(zs))
         zs = self.activ(self.zs_cnn3(zs))
         zs = self.activ(self.zs_cnn4(zs)).reshape(state.shape[0], -1)
         return ln_activ(self.zs_lin(zs), self.activ)
 
-
     def mlp_zs(self, state: torch.Tensor):
         return ln_activ(self.zs_mlp(state), self.activ)
 
 
 class Policy(nn.Module):
-    def __init__(self, action_dim: int, discrete: bool, gumbel_tau: float=10, zs_dim: int=512, hdim: int=512, activ: str='relu'):
+    def __init__(
+        self,
+        action_dim: int,
+        discrete: bool,
+        gumbel_tau: float = 10,
+        zs_dim: int = 512,
+        hdim: int = 512,
+        activ: str = "relu",
+    ):
         super().__init__()
         self.policy = BaseMLP(zs_dim, action_dim, hdim, activ)
-        self.activ = partial(F.gumbel_softmax, tau=gumbel_tau) if discrete else torch.tanh
+        self.activ = (
+            partial(F.gumbel_softmax, tau=gumbel_tau) if discrete else torch.tanh
+        )
         self.discrete = discrete
-
 
     def forward(self, zs: torch.Tensor):
         pre_activ = self.policy(zs)
         action = self.activ(pre_activ)
         return action, pre_activ
-
 
     def act(self, zs: torch.Tensor):
         action, _ = self.forward(zs)
@@ -111,11 +129,17 @@ class Policy(nn.Module):
 
 
 class Value(nn.Module):
-    def __init__(self, zsa_dim: int=512, hdim: int=512, activ: str='elu'):
+    def __init__(self, zsa_dim: int = 512, hdim: int = 512, activ: str = "elu"):
         super().__init__()
 
         class ValueNetwork(nn.Module):
-            def __init__(self, input_dim: int, output_dim: int, hdim: int=512, activ: str='elu'):
+            def __init__(
+                self,
+                input_dim: int,
+                output_dim: int,
+                hdim: int = 512,
+                activ: str = "elu",
+            ):
                 super().__init__()
                 self.q1 = BaseMLP(input_dim, hdim, hdim, activ)
                 self.q2 = nn.Linear(hdim, output_dim)
@@ -129,7 +153,6 @@ class Value(nn.Module):
 
         self.q1 = ValueNetwork(zsa_dim, 1, hdim, activ)
         self.q2 = ValueNetwork(zsa_dim, 1, hdim, activ)
-
 
     def forward(self, zsa: torch.Tensor):
         return torch.cat([self.q1(zsa), self.q2(zsa)], 1)
