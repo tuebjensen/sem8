@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from importlib.util import find_spec
+from datetime import datetime
 
 from ail_fe_main_scmds import SCmd
 from ail_parser import parse_intermixed_args
@@ -54,9 +55,13 @@ def main(args: argparse.Namespace):
                 )
             ]
         )
+
+        id = (
+            "'" + str(datetime.now()).replace(" ", "-") + command.replace("'", "") + "'"
+        )
         print("Running command", command)
         subprocess.run(
-            command + " 2>&1 | tee output.log",
+            command + " 2>&1 | tee output-" + id + ".log",
             shell=True,
             check=True,
         )
