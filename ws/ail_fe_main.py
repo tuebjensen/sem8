@@ -34,21 +34,32 @@ def main(args: argparse.Namespace):
         if module_path is None:
             raise ImportError(f"Module {args.f} not found (origin)")
 
-        command = [
-            "srun",
-            *scmd.opts,
-            "singularity",
-            "exec",
-            "--nv",
-            "/ceph/container/pytorch/pytorch_24.09.sif",
-            "bash",
-            "ail_slurm_main.sh",
-            module_path,
-            *sys.argv[1:],
-            *scmd.python_args,
-        ]
+        command = " ".join(
+            [
+                arg if i == 0 else "'" + arg.replace("'", "'\"'\"'") + "'"
+                for (i, arg) in enumerate(
+                    [
+                        "srun",
+                        *scmd.opts,
+                        "singularity",
+                        "exec",
+                        "--nv",
+                        "/ceph/container/pytorch/pytorch_24.09.sif",
+                        "bash",
+                        "ail_slurm_main.sh",
+                        module_path,
+                        *sys.argv[1:],
+                        *scmd.python_args,
+                    ]
+                )
+            ]
+        )
         print("Running command", command)
-        subprocess.Popen(command)
+        subprocess.run(
+            command + " 2>&1 | tee output.log",
+            shell=True,
+            check=True,
+        )
 
 
 if __name__ == "__main__":
