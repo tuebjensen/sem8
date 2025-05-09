@@ -47,12 +47,12 @@ class ReplayBuffer:
         # Store obs on GPU if they are sufficient small.
         # print(torch.cuda.mem_get_info())
         memory, _ = torch.cuda.mem_get_info()
-        obs_space = np.prod((self.max_size, *self.obs_shape)) * 1 if pixel_obs else 4
-        ard_space = self.max_size * (action_dim + 2) * 4
-        if obs_space + ard_space < memory:
-            self.storage_device = self.device
-        else:
-            self.storage_device = torch.device("cpu")
+        obs_space = np.prod((self.max_size, *self.obs_shape)) * 1 if pixel_obs else 2
+        ard_space = self.max_size * (action_dim + 2) * 2
+        # if obs_space + ard_space < memory:
+        #     self.storage_device = self.device
+        # else:
+        self.storage_device = torch.device("cpu")
 
         self.action_dim = action_dim
         self.action_scale = max_action if normalize_actions else 1.0
@@ -103,12 +103,19 @@ class ReplayBuffer:
         )
 
     # Extract the most recent obs from the state that includes history.
-    def extract_obs(self, state: np.array):
-        return torch.tensor(
-            state[-self.num_channels :].reshape(self.obs_shape),
-            dtype=self.obs_dtype,
-            device=self.storage_device,
-        )
+    def extract_obs(self, state: np.ndarray | torch.Tensor):
+        if isinstance(state, torch.Tensor):
+            return (
+                state[-self.num_channels :]
+                .reshape(self.obs_shape)
+                .to(self.storage_device)
+            )
+        else:
+            return torch.tensor(
+                state[-self.num_channels :].reshape(self.obs_shape),
+                dtype=self.obs_dtype,
+                device=self.storage_device,
+            )
 
     # Used to map discrete actions to one hot or normalize continuous actions.
     def one_hot_or_normalize(self, action: int | float):
@@ -122,9 +129,9 @@ class ReplayBuffer:
 
     def add(
         self,
-        state: np.array,
+        state: np.ndarray | torch.Tensor,
         action: int | float,
-        next_state: np.array,
+        next_state: np.ndarray | torch.Tensor,
         reward: float,
         terminated: bool,
         truncated: bool,
@@ -164,7 +171,7 @@ class ReplayBuffer:
         if terminated or truncated:
             self.terminal(next_state, truncated)
 
-    def terminal(self, state: np.array, truncated: bool):
+    def terminal(self, state: np.ndarray | torch.Tensor, truncated: bool):
         self.obs[self.ind] = self.extract_obs(state)
 
         self.mask[(self.ind + self.history - 1) % self.max_size] = 0
@@ -262,7 +269,7 @@ class ReplayBuffer:
     def save(self, save_folder: str):
         np.savez_compressed(
             f"{save_folder}/buffer_data",
-            obs=self.obs.cpu().data.numpy(),
+            obs=self.obs.float().cpu().data.numpy(),
             ard=self.action_reward_notdone.cpu().data.numpy(),
             state_ind=self.state_ind,
             next_ind=self.next_ind,

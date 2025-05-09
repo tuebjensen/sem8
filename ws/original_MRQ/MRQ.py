@@ -169,7 +169,9 @@ class Agent:
         self.reward_scale, self.target_reward_scale = 1, 0
         self.training_steps = 0
 
-    def select_action(self, state: np.array, use_exploration: bool = True):
+    def select_action(
+        self, state: np.ndarray | torch.Tensor, use_exploration: bool = True
+    ):
         if (
             self.replay_buffer.size < self.buffer_size_before_training
             and use_exploration
@@ -177,9 +179,12 @@ class Agent:
             return None  # Sample random action from environment instead.
 
         with torch.no_grad():
-            state = torch.tensor(state, dtype=torch.float, device=self.device).reshape(
-                -1, *self.state_shape
-            )
+            if isinstance(state, torch.Tensor):
+                state = state.reshape(-1, *self.state_shape)
+            else:
+                state = torch.tensor(
+                    state, dtype=torch.float, device=self.device
+                ).reshape(-1, *self.state_shape)
             zs = self.encoder.zs(state)
             action = self.policy.act(zs)
             if use_exploration:

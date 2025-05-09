@@ -9,12 +9,11 @@ import dataclasses
 import numbers
 from collections import deque
 from functools import partial
-from typing import Dict, Iterable, TypedDict, Unpack
+from typing import Dict, Iterable
 
 import gymnasium as gym
 import numpy as np
 import pygame
-import torch
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 from gymnasium.wrappers import TimeLimit
 
