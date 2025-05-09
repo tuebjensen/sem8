@@ -1,9 +1,10 @@
 import argparse
 import os
+import re
 import subprocess
 import sys
-from importlib.util import find_spec
 from datetime import datetime
+from importlib.util import find_spec
 
 from ail_fe_main_scmds import SCmd
 from ail_parser import parse_intermixed_args
@@ -55,10 +56,23 @@ def main(args: argparse.Namespace):
                 )
             ]
         )
-
+        args_for_id = [
+            str(datetime.now()),
+            *scmd.opts,
+            module_path,
+            *sys.argv[1:],
+            *scmd.python_args,
+        ]
         id = (
-            "'" + str(datetime.now()).replace(" ", "-") + command.replace("'", "") + "'"
+            "'"
+            + "-".join(args_for_id)
+            .replace("'", "-")
+            .replace("/", "-")
+            .replace(" ", "-")
+            + "'"
         )
+        id = re.sub(r"-+", "-", id)
+        # id = ""
         print("Running command", command)
         subprocess.run(
             command + " 2>&1 | tee output-" + id + ".log",

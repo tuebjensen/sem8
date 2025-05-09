@@ -27,7 +27,7 @@ def modify_parser(parser: argparse._ArgumentGroup):
 def get_scmds(args: argparse.Namespace) -> list[SCmd]:
     return [
         SCmd(
-            opts=([f"--gres=gpu:{args.gpu}", "--mem-per-gpu=30G"]),
+            opts=([f"--gres=gpu:{args.gpu}", "--mem-per-gpu=50G"]),
         )
     ]
 
