@@ -56,7 +56,7 @@ class Encoder(nn.Module):
         activ: str = "elu",
     ):
         super().__init__()
-        self.eagle_seq_len = 97
+        self.eagle_seq_len = 50
         self.eagle_hidden_dim = 2048
         self.eagle_state_dim = 1024
         self.robot_state_dim = 3
@@ -105,16 +105,16 @@ class Encoder(nn.Module):
         return ln_activ(self.zs_lin(zs), self.activ)
 
     def mlp_zs(self, state: torch.Tensor):
-        # state.shape = (B, 3+97*2048)
+        # state.shape = (B, 3+50*2048)
         # robot_state.shape = (B, 3)
         robot_state = state[:, : self.robot_state_dim]
-        # task_embedding.shape = (B, 97*2048)
+        # task_embedding.shape = (B, 50*2048)
         task_embedding = state[:, self.robot_state_dim :]
-        # task_embedding.shape(B, 97, 2048)
+        # task_embedding.shape(B, 50, 2048)
         task_embedding = self.linear(
             task_embedding.reshape(-1, self.eagle_seq_len, self.eagle_hidden_dim)
         )
-        # task_embedding.shape(B, 97, 1024) -> (B, 1024, 97) -> (B, 1024, 1) -> (B, 1024)
+        # task_embedding.shape(B, 50, 1024) -> (B, 1024, 50) -> (B, 1024, 1) -> (B, 1024)
         task_embedding = self.pooler(task_embedding.transpose(1, 2)).squeeze(-1)
         # combined_state.shape = (B, 3+1024)
         combined_state = torch.cat([robot_state, task_embedding], dim=1)

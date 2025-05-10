@@ -40,6 +40,7 @@ class EagleBackbone(nn.Module):
         self.freeze_and_eval()
         self.device = device
         self.model.to(device)
+        self.pooler = nn.AdaptiveAvgPool1d(25)
         self.processor = EagleProcessor(
             model_path="eagle2_hg_model", max_input_tiles=1, model_spec=None
         )
@@ -122,7 +123,7 @@ class EagleBackbone(nn.Module):
         output_hidden_states=None,
         skip_llm=False,
         img_context_token_id=None,
-    ) -> torch.LongTensor:
+    ) -> torch.Tensor:
         assert pixel_values is not None
         assert img_context_token_id is not None
 
@@ -149,8 +150,10 @@ class EagleBackbone(nn.Module):
             output_hidden_states=True,
         )
         embeddings = embeddings.hidden_states[-1]
-
-        return embeddings
+        pooled_embeddings = self.pooler(
+            embeddings[:, :-25, :].transpose(1, 2)
+        ).transpose(1, 2)
+        return torch.cat([pooled_embeddings, embeddings[:, :25, :]], dim=1)
 
     def prepare_message(self, message: list):
         # Message could look like [{"role": "system", "content": "SYSTEM MESSAGE HERE" }, {"role": "user", "image": [{"np_array": np.ndarray(image_data)}], "content": "USER MESSAGE HERE" }]
@@ -380,14 +383,12 @@ class OnlineExperiment:
         # We save after evaluating, this avoids re-evaluating immediately after loading an experiment.
         if self.t != 0 and self.init_timestep:
             return
-        print("Evaluating")
         total_reward = np.zeros(self.eval_eps)
         for ep in tqdm.tqdm(range(self.eval_eps)):
+            print("Evaluating episode", ep + 1)
             state, terminated, truncated = self.eval_env.reset(), False, False
             while not (terminated or truncated):
-                action = self.agent.select_action(
-                    np.array(state), use_exploration=False
-                )
+                action = self.agent.select_action(state, use_exploration=False)
                 state, _, terminated, truncated = self.eval_env.step(action)
             total_reward[ep] = self.eval_env.ep_total_reward
 

@@ -14,6 +14,7 @@ from typing import Dict, Iterable
 import gymnasium as gym
 import numpy as np
 import pygame
+import torch
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 from gymnasium.wrappers import TimeLimit
 
@@ -116,19 +117,18 @@ class Sem8Preprocessing:
         self.pixel_obs = False
         self.eval_env = eval_env
         self.obs_shape = (
-            3 + 97 * 2048,
-        )  # 3 for robot state (x,y,theta), 1024 for task embedding
-        # (5,3,2)
+            3 + 50 * 2048,
+        )  # 3 for robot state (x,y,theta), 97*2048 for eagle embeddings
         self.history = 1
         self.action_space = self.env.action_space
         self.max_ep_timesteps = self.env.spec.max_episode_steps
         self.model = model
 
         self.system_message = "You are guiding a robot to pick up an object in a maze. "
-        self.system_message += "The robot is represented by a green circle with red line indicating the direction it's pointing in. "
         self.system_message += (
-            "The maze is represented by either horizontal or vertical green lines. "
+            "The robot the green circle with a red line indicating direction. "
         )
+        self.system_message += "The maze is represented by green lines. "
         self.system_message += (
             "The robot can move forward, turn left or right, and pick up the object. "
         )
@@ -148,7 +148,7 @@ class Sem8Preprocessing:
                     flattened_state.append(s)
 
         _flatten_state(state)
-        return np.array(flattened_state, dtype=np.float32)
+        return torch.tensor(flattened_state, dtype=torch.bfloat16)
 
     def augment_state(self, state, info):
         image_surface = info["image"]
@@ -167,11 +167,10 @@ class Sem8Preprocessing:
         ]
         inputs = self.model.prepare_message(message)
         # Get the task embedding from the model
-        task_embedding = self.model(inputs).squeeze(0).cpu().numpy()
+        task_embedding = self.model(inputs).squeeze(0).cpu()
+        # print("Task embedding shape:", task_embedding.shape)
         # Concatenate the robot state and task embedding
-        state = np.concatenate(
-            (self.flatten_state(state), task_embedding.flatten()), axis=0
-        )
+        state = torch.cat([self.flatten_state(state), task_embedding.flatten()], axis=0)
         return state
 
     def step(self, action: int | float):

@@ -180,7 +180,9 @@ class Agent:
 
         with torch.no_grad():
             if isinstance(state, torch.Tensor):
-                state = state.reshape(-1, *self.state_shape)
+                state = (
+                    state.reshape(-1, *self.state_shape).to(self.device).to(torch.float)
+                )
             else:
                 state = torch.tensor(
                     state, dtype=torch.float, device=self.device
