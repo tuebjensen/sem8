@@ -6,6 +6,7 @@
 
 
 import argparse
+from collections import defaultdict
 import dataclasses
 import json
 import os
@@ -314,6 +315,7 @@ class OnlineExperiment:
         time_passed: float,
         eval_freq: int,
         eval_eps: int,
+        timings: dict,
         eval_folder: str,
         project_name: str,
         save_full: bool = False,
@@ -342,27 +344,44 @@ class OnlineExperiment:
 
         self.init_timestep = True
 
+        self.timings = defaultdict(list)
+        self.timings.update(**timings)
+
     def run(self):
+        t = time.time()
         state = self.env.reset()
+        self.timings["reset"].append(time.time() - t)
+
         while self.t <= self.total_timesteps:
             self.maybe_evaluate()
+
             if (
                 self.save_full
                 and self.t % self.save_freq == 0
                 and not self.init_timestep
             ):
+                t = time.time()
                 save_experiment(self)
+                self.timings["save"].append(time.time() - t)
+
+            t = time.time()
             action = self.agent.select_action(state)
             if action is None:
                 action = self.env.action_space.sample()
+            else:
+                self.timings["select_action"].append(time.time() - t)
 
+            t = time.time()
             next_state, reward, terminated, truncated = self.env.step(action)
             self.agent.replay_buffer.add(
                 state, action, next_state, reward, terminated, truncated
             )
             state = next_state
+            self.timings["step"].append(time.time() - t)
 
+            t = time.time()
             self.agent.train()
+            self.timings["train"].append(time.time() - t)
 
             if terminated or truncated:
                 self.logger.log_print(
@@ -386,10 +405,20 @@ class OnlineExperiment:
         total_reward = np.zeros(self.eval_eps)
         for ep in tqdm.tqdm(range(self.eval_eps)):
             print("Evaluating episode", ep + 1)
+
+            t = time.time()
             state, terminated, truncated = self.eval_env.reset(), False, False
+            self.timings["eval_reset"].append(time.time() - t)
+
             while not (terminated or truncated):
+                t = time.time()
                 action = self.agent.select_action(state, use_exploration=False)
+                self.timings["eval_select_action"].append(time.time() - t)
+
+                t = time.time()
                 state, _, terminated, truncated = self.eval_env.step(action)
+                self.timings["eval_step"].append(time.time() - t)
+
             total_reward[ep] = self.eval_env.ep_total_reward
 
         self.evals.append(total_reward.mean())
@@ -400,9 +429,16 @@ class OnlineExperiment:
             f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes"
         )
 
+        t = time.time()
         np.savetxt(
             f"{self.eval_folder}/{self.project_name}.txt", self.evals, fmt="%.14f"
         )
+        np.savetxt(
+            f"{self.eval_folder}/{self.project_name}_timings.txt",
+            json.dumps(dict(self.timings), indent=4),
+            fmt="%.14f",
+        )
+        self.timings["eval_save"].append(time.time() - t)
 
 
 def save_experiment(exp: OnlineExperiment):
@@ -412,6 +448,7 @@ def save_experiment(exp: OnlineExperiment):
     var_dict["time_passed"] = exp.time_passed + time.time() - exp.start_time
     var_dict["np_seed"] = np.random.get_state()
     var_dict["torch_seed"] = torch.get_rng_state()
+    var_dict["timings"] = exp.timings
     np.save(f"{exp.save_folder}/{exp.project_name}/exp_var.npy", var_dict)
     # Save eval
     np.savetxt(f"{exp.save_folder}/{exp.project_name}.txt", exp.evals, fmt="%.14f")
@@ -475,6 +512,7 @@ def load_experiment(
         exp_dict["time_passed"],
         exp_dict["eval_freq"],
         exp_dict["eval_eps"],
+        exp_dict["timings"],
         args.eval_folder,
         args.project_name,
         args.save_experiment,
