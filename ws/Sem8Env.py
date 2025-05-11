@@ -296,7 +296,9 @@ class Sem8Env(gym.Env):
                 self._bbox_rects[self._target_bbox_index],
             )
 
-            reward = 10 if correct_pick_up else -0.1
+            if correct_pick_up:
+                reward = 10
+                
             terminated = correct_pick_up
 
         if self.render_mode == "human":

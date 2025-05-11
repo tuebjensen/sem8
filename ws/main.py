@@ -12,6 +12,7 @@ import json
 import os
 import pickle
 import time
+from typing import override
 
 import numpy as np
 import torch
@@ -27,6 +28,18 @@ import original_MRQ.utils as utils
 import Sem8Env as _
 from eagle2_hg_model.inference_eagle_repo import EagleProcessor
 
+class MovingAvg:
+    def __init__(self):
+        self.n = 0
+        self.moving_avg = .0
+
+    def add(self, x: float):
+        self.n += 1
+        self.moving_avg += (x - self.moving_avg) / self.n
+    
+    @override
+    def __str__(self) -> str:
+        return f"{self.moving_avg} ({self.n})"
 
 class EagleBackbone(nn.Module):
     def __init__(self, device: torch.device):
@@ -320,7 +333,7 @@ class OnlineExperiment:
         save_full: bool = False,
         save_freq: int = 1e3,
         save_folder: str = "",
-        timings=defaultdict(list),
+        timings: defaultdict[str, MovingAvg] | None=None,
     ):
         self.agent = agent
         self.env = env
@@ -344,12 +357,12 @@ class OnlineExperiment:
 
         self.init_timestep = True
 
-        self.timings = timings
+        self.timings = defaultdict(MovingAvg) if timings is None else timings
 
     def run(self):
         t = time.time()
         state = self.env.reset()
-        self.timings["reset"].append(time.time() - t)
+        self.timings["reset"].add(time.time() - t)
 
         while self.t <= self.total_timesteps:
             self.maybe_evaluate()
@@ -361,14 +374,14 @@ class OnlineExperiment:
             ):
                 t = time.time()
                 save_experiment(self)
-                self.timings["save"].append(time.time() - t)
+                self.timings["save"].add(time.time() - t)
 
             t = time.time()
             action = self.agent.select_action(state)
             if action is None:
                 action = self.env.action_space.sample()
             else:
-                self.timings["select_action"].append(time.time() - t)
+                self.timings["select_action"].add(time.time() - t)
 
             t = time.time()
             next_state, reward, terminated, truncated = self.env.step(action)
@@ -376,11 +389,11 @@ class OnlineExperiment:
                 state, action, next_state, reward, terminated, truncated
             )
             state = next_state
-            self.timings["step"].append(time.time() - t)
+            self.timings["step"].add(time.time() - t)
 
             t = time.time()
             self.agent.train()
-            self.timings["train"].append(time.time() - t)
+            self.timings["train"].add(time.time() - t)
 
             if terminated or truncated:
                 self.logger.log_print(
@@ -407,16 +420,16 @@ class OnlineExperiment:
 
             t = time.time()
             state, terminated, truncated = self.eval_env.reset(), False, False
-            self.timings["eval_reset"].append(time.time() - t)
+            self.timings["eval_reset"].add(time.time() - t)
 
             while not (terminated or truncated):
                 t = time.time()
                 action = self.agent.select_action(state, use_exploration=False)
-                self.timings["eval_select_action"].append(time.time() - t)
+                self.timings["eval_select_action"].add(time.time() - t)
 
                 t = time.time()
                 state, _, terminated, truncated = self.eval_env.step(action)
-                self.timings["eval_step"].append(time.time() - t)
+                self.timings["eval_step"].add(time.time() - t)
 
             total_reward[ep] = self.eval_env.ep_total_reward
 
@@ -425,14 +438,15 @@ class OnlineExperiment:
         self.logger.title(
             f"Evaluation at {self.t} time steps\n"
             f"Average total reward over {self.eval_eps} episodes: {total_reward.mean():.3f}\n"
-            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes"
+            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes",
+            f"Timings: {dict(self.timings)}",
         )
 
         t = time.time()
         np.savetxt(
             f"{self.eval_folder}/{self.project_name}.txt", self.evals, fmt="%.14f"
         )
-        self.timings["eval_save"].append(time.time() - t)
+        self.timings["eval_save"].add(time.time() - t)
 
 
 def save_experiment(exp: OnlineExperiment):
