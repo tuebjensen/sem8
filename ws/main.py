@@ -315,12 +315,12 @@ class OnlineExperiment:
         time_passed: float,
         eval_freq: int,
         eval_eps: int,
-        timings: dict,
         eval_folder: str,
         project_name: str,
         save_full: bool = False,
-        save_freq: int = 1e5,
+        save_freq: int = 1e3,
         save_folder: str = "",
+        timings=defaultdict(list),
     ):
         self.agent = agent
         self.env = env
@@ -344,8 +344,7 @@ class OnlineExperiment:
 
         self.init_timestep = True
 
-        self.timings = defaultdict(list)
-        self.timings.update(**timings)
+        self.timings = timings
 
     def run(self):
         t = time.time()
@@ -433,11 +432,6 @@ class OnlineExperiment:
         np.savetxt(
             f"{self.eval_folder}/{self.project_name}.txt", self.evals, fmt="%.14f"
         )
-        np.savetxt(
-            f"{self.eval_folder}/{self.project_name}_timings.txt",
-            json.dumps(dict(self.timings), indent=4),
-            fmt="%.14f",
-        )
         self.timings["eval_save"].append(time.time() - t)
 
 
@@ -512,12 +506,12 @@ def load_experiment(
         exp_dict["time_passed"],
         exp_dict["eval_freq"],
         exp_dict["eval_eps"],
-        exp_dict["timings"],
         args.eval_folder,
         args.project_name,
         args.save_experiment,
         args.save_freq,
         args.save_folder,
+        timings=exp_dict["timings"],
     )
 
 
