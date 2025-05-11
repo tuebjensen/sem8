@@ -12,7 +12,6 @@ import json
 import os
 import pickle
 import time
-from typing import override
 
 import numpy as np
 import torch
@@ -37,7 +36,6 @@ class MovingAvg:
         self.n += 1
         self.moving_avg += (x - self.moving_avg) / self.n
     
-    @override
     def __str__(self) -> str:
         return f"{self.moving_avg} ({self.n})"
 
