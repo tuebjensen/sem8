@@ -57,7 +57,7 @@ class Sem8Env(gym.Env):
         self._eval = kwargs.get("eval", False)
         self._eval_data_dir = kwargs.get("eval_data_dir", "")
         self.is_last_eval_data = False
-        self._eval_data_generator = self._load_eval_data()
+        self._eval_data_generator = self._load_eval_data(eval_eps=kwargs.get("eval_eps", None))
 
         self.action_space = spaces.Discrete(4)  # Forward, Left, Right, Pick up
         self.observation_space = spaces.Tuple(
@@ -174,10 +174,10 @@ class Sem8Env(gym.Env):
         )
         self._prompt = f"Your goal is to locate and pick up the {self._categories[self._target_bbox_index]}."
 
-    def _load_eval_data(self):
+    def _load_eval_data(self, eval_eps: int | None=None):
         print("Loading eval data from", self._eval_data_dir)
         with open(os.path.join(self._eval_data_dir, "meta_data.json")) as f:
-            eval_meta_data = json.load(f)
+            eval_meta_data = json.load(f)[:eval_eps]
         while True:
             for image_data in eval_meta_data:
                 image_name = image_data["image_file_name"]

@@ -102,6 +102,7 @@ class Sem8Preprocessing:
         eval_env: bool = False,
         eval_data_dir: str = "",
         model: object = None,
+        **kwargs,
     ):
         # kwargs should contain "eval_data_dir" (where to find the eval data) and "model" (the VLM for embedding image and instruction)
         self.env = TimeLimit(
@@ -110,6 +111,7 @@ class Sem8Preprocessing:
                 render_mode="rgb_array",
                 eval=eval_env,
                 eval_data_dir=eval_data_dir,
+                **kwargs,
             ),
             max_episode_steps=1000,
         )
@@ -117,8 +119,8 @@ class Sem8Preprocessing:
         self.pixel_obs = False
         self.eval_env = eval_env
         self.obs_shape = (
-            3 + 50 * 2048,
-        )  # 3 for robot state (x,y,theta), 97*2048 for eagle embeddings
+            3 + 50 * 1536,
+        )  # 3 for robot state (x,y,theta), 97*1536 for eagle embeddings
         self.history = 1
         self.action_space = self.env.action_space
         self.max_ep_timesteps = self.env.spec.max_episode_steps

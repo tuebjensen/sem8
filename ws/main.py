@@ -9,6 +9,7 @@ import argparse
 from collections import defaultdict
 import dataclasses
 import json
+import math
 import os
 import pickle
 import time
@@ -39,6 +40,9 @@ class MovingAvg:
     def __str__(self) -> str:
         return f"{self.moving_avg} ({self.n})"
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
 class EagleBackbone(nn.Module):
     def __init__(self, device: torch.device):
         super().__init__()
@@ -46,12 +50,14 @@ class EagleBackbone(nn.Module):
         self.config = AutoConfig.from_pretrained(
             "eagle2_hg_model", trust_remote_code=True
         )
+        self.device = device
         self.model = AutoModel.from_config(self.config, trust_remote_code=True)
+        self.linear = torch.nn.Linear(2048, 1536)
         self.reduce_model()
         self.load_weights()
         self.freeze_and_eval()
-        self.device = device
         self.model.to(device)
+        self.linear.to(device)
         self.pooler = nn.AdaptiveAvgPool1d(25)
         self.processor = EagleProcessor(
             model_path="eagle2_hg_model", max_input_tiles=1, model_spec=None
@@ -81,10 +87,19 @@ class EagleBackbone(nn.Module):
     def load_weights(self):
         backbone_weights = self.get_backbone_weights()
         for key in backbone_weights.keys():
-            if key in self.model.state_dict():
-                self.model.state_dict()[key].copy_(backbone_weights[key])
-            else:
-                print(f"Key {key} not found in model state dict")
+            w = backbone_weights[key]
+            if key.startswith("model."):
+                k = key.removeprefix("model.")
+                if k in self.model.state_dict():
+                    self.model.state_dict()[k].copy_(w)
+                else:
+                    print(f"Key {key} not found in model state dict")
+            elif key.startswith("linear."):
+                k = key.removeprefix("linear.")
+                if k in self.linear.state_dict():
+                    self.linear.state_dict()[k].copy_(w)
+                else:
+                    print(f"Key {key} not found in linear state dict")
 
     def get_backbone_weights(self):
         # For some reason the module parser thing complains if I don't import this here
@@ -92,12 +107,14 @@ class EagleBackbone(nn.Module):
 
         path = snapshot_download("nvidia/GR00T-N1-2B", repo_type="model")
         safe_tensors_path = path + "/model.safetensors"
-        backbone_tensors = {}
+        backbone_tensors: dict[str, torch.Tensor] = {}
         with safe_open(safe_tensors_path, framework="pt", device="cuda") as f:
             keys = f.keys()
             for key in keys:
-                if "backbone.model." in key:
-                    backbone_tensors[key.replace("backbone.model.", "")] = f.get_tensor(
+                # type safety
+                assert isinstance(key, str)
+                if "backbone." in key:
+                    backbone_tensors[key.removeprefix("backbone.")] = f.get_tensor(
                         key
                     )
 
@@ -180,7 +197,7 @@ class EagleBackbone(nn.Module):
             attention_mask=inputs["attention_mask"],
             img_context_token_id=self.img_context_token_id,
         )
-        return embeddings
+        return self.linear(embeddings)
 
 
 @dataclasses.dataclass
@@ -198,7 +215,7 @@ class DefaultExperimentArguments:
     Frozen_eval_freq: int = 5e3
 
     Sem8_total_timesteps: int = 1e6  # 1e6
-    Sem8_eval_freq: int = 5e3  # 5e3
+    Sem8_eval_freq: int = 5e4  # 5e3
 
     def __post_init__(self):
         utils.enforce_dataclass_type(self)
@@ -243,7 +260,7 @@ def main(args):
             assert os.path.exists(eval_data_folder_path), "eval_data_dir does not exist"
             with open(os.path.join(eval_data_folder_path, "meta_data.json"), "r") as f:
                 meta_data = json.load(f)
-            eval_eps = len(meta_data)
+            eval_eps = min(len(meta_data), eval_eps)
             model = EagleBackbone(device)
 
         env = env_preprocessing.Env(
@@ -257,6 +274,7 @@ def main(args):
         eval_env = env_preprocessing.Env(
             args.env,
             args.seed + 100,
+            eval_eps=eval_eps,
             eval_env=True,
             eval_data_dir=eval_data_folder_path,
             remove_info=remove_info,
@@ -398,9 +416,12 @@ class OnlineExperiment:
                     f"Total T: {self.t + 1}, "
                     f"Episode Num: {self.env.ep_num}, "
                     f"Episode T: {self.env.ep_timesteps}, "
-                    f"Reward: {self.env.ep_total_reward:.3f}"
+                    f"Reward: {self.env.ep_total_reward:.3f}, "
+                    f"Timings: {dict(self.timings)}"
                 )
+                t = time.time()
                 state = self.env.reset()
+                self.timings["reset"].add(time.time() - t)
 
             self.t += 1
             self.init_timestep = False
@@ -436,7 +457,7 @@ class OnlineExperiment:
         self.logger.title(
             f"Evaluation at {self.t} time steps\n"
             f"Average total reward over {self.eval_eps} episodes: {total_reward.mean():.3f}\n"
-            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes",
+            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes\n"
             f"Timings: {dict(self.timings)}",
         )
 

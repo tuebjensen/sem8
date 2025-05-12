@@ -26,7 +26,8 @@ class Hyperparameters:
     target_update_freq: int = 250
 
     # Exploration
-    buffer_size_before_training: int = int(10e3)  # 10e3
+    # TODO: change this back!
+    buffer_size_before_training: int = int(1e3)  # 10e3
     exploration_noise: float = 0.2
 
     # TD3
