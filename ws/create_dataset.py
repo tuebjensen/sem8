@@ -1,3 +1,4 @@
+import argparse
 import json
 import math
 import os
@@ -126,7 +127,47 @@ def images_iterator(images, annotations):
 #     return None
 
 
-def generate_image():
+def generate_simple_image(colors: str):
+    # Generate a simple image with solid color rectangles
+    def place_colors(colors, max_tries, current_rects=[]):
+        if len(colors) == 0:
+            return []
+        color = colors[0]
+        for _ in range(max_tries):
+            rect_width = random.randint(80, 125)
+            rect_height = random.randint(80, 125)
+            rect_x = random.randint(0, width - rect_width)
+            rect_y = random.randint(0, height - rect_height)
+            rect = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
+            # collidelist returns -1 if there is no collision
+            overlapping = rect.collidelist(current_rects) != -1
+            if not overlapping:
+                child_rects = place_colors(
+                    colors[1:], max_tries, current_rects + [rect]
+                )
+                if child_rects is not None:
+                    return [(rect, color)] + child_rects
+        return None
+
+    width, height = 441, 441
+    image = pygame.Surface((width, height))
+    image.fill((100, 100, 100))
+    # Create a rectangle with random size and position
+    colors_list = colors.split(",")
+    colors_list = [color.strip() for color in colors_list]
+    max_tries = 10
+    color_rect_and_color_name = None
+    while color_rect_and_color_name is None:
+        color_rect_and_color_name = place_colors(colors_list, max_tries)
+    # print(color_rect_and_color_name)
+    rects = []
+    for rect, color in color_rect_and_color_name:
+        rects.append(rect)
+        image.fill(color, rect)
+    return image, rects, colors_list
+
+
+def generate_image(n_categories: int):
     def find_and_place_objects(sampled_categories, max_tries: int, current_rects=[]):
         if len(sampled_categories) == 0:
             return []
@@ -184,7 +225,6 @@ def generate_image():
     min_object_size = 80
     image = pygame.Surface((width, height))
     image.fill((100, 100, 100))
-    n_categories = 7
     sampled_categories = random.sample(categories, n_categories)
     max_tries = 10
 
@@ -252,13 +292,15 @@ def generate_maze(
     return image, maze_rects, bbox_rects
 
 
-def main():
+def main(args):
     import Sem8Env
 
-    env = Sem8Env.Sem8Env()
+    env = Sem8Env.Sem8Env(
+        use_simple_env=args.use_simple_env, colors=args.colors, n_objects=args.n_objects
+    )
     n_images = 50
     validation_data = []
-    data_dir = "validation"
+    data_dir = args.save_folder
     for i in tqdm(range(n_images)):
         env.reset()
         image_file_name = f"val_image_{i}.png"
@@ -294,5 +336,26 @@ def main():
         json.dump(validation_data, f, indent=4)
 
 
+def modify_parser(parser):
+    # Experiment
+    parser.add_argument("--save_folder", type=str, required=True)
+    parser.add_argument("--use_simple_env", action="store_true")
+    parser.add_argument(
+        "--colors",
+        type=str,
+        default="red,blue",
+        help="Comma separated list of colors for simple env. It will put one rectangle of each color on the image.",
+    )
+    parser.add_argument(
+        "--n_objects",
+        type=int,
+        default=7,
+        help="Number of objects to place in the image if not using simple env.",
+    )
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    modify_parser(parser)
+    args = parser.parse_args()
+    main(args)

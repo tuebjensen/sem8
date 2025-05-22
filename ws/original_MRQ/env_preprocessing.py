@@ -16,7 +16,7 @@ import numpy as np
 import pygame
 import torch
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
-from gymnasium.wrappers import TimeLimit
+from gymnasium.wrappers import RecordVideo, TimeLimit
 
 from . import utils
 
@@ -113,30 +113,51 @@ class Sem8Preprocessing:
                 eval_data_dir=eval_data_dir,
                 **kwargs,
             ),
-            max_episode_steps=1000,
+            max_episode_steps=500,
         )
+        if kwargs.get("save_video", False):
+            self.env = RecordVideo(
+                self.env,
+                video_folder=kwargs.get("video_folder", "videos"),
+                name_prefix=kwargs.get("project_name", "eval"),
+                disable_logger=True,
+                episode_trigger=lambda x: True,
+            )
+
         self.offline = False
         self.pixel_obs = False
         self.eval_env = eval_env
-        self.obs_shape = (
-            3 + 50 * 1536,
-        )  # 3 for robot state (x,y,theta), 97*1536 for eagle embeddings
+        use_last_embedding = kwargs.get("use_last_embedding", False)
+        use_hf_model = kwargs.get("use_hf_model", False)
+        embedding_dim = 896 if use_hf_model else 1536
+        if use_last_embedding:
+            self.obs_shape = (3 + embedding_dim,)
+        else:
+            self.obs_shape = (
+                3 + 20 * embedding_dim,
+            )  # 3 for robot state (x,y,theta), 20*1536 for eagle embeddings
         self.history = 1
         self.action_space = self.env.action_space
         self.max_ep_timesteps = self.env.spec.max_episode_steps
         self.model = model
-
-        self.system_message = "You are guiding a robot to pick up an object in a maze. "
-        self.system_message += (
-            "The robot the green circle with a red line indicating direction. "
-        )
-        self.system_message += "The maze is represented by green lines. "
-        self.system_message += (
-            "The robot can move forward, turn left or right, and pick up the object. "
-        )
-        self.system_message += (
-            "Your goal is to avoid hitting the maze while navigating to the object."
-        )
+        use_maze = kwargs.get("use_maze", True)
+        if use_maze:
+            self.system_message = (
+                "You are guiding a robot to pick up an object in a maze. "
+            )
+            self.system_message += (
+                "The robot the green circle with a red line indicating direction. "
+            )
+            self.system_message += "The maze is represented by green lines. "
+            self.system_message += "The robot can move forward, turn left or right, and pick up the object. "
+            self.system_message += (
+                "Your goal is to avoid hitting the maze while navigating to the object."
+            )
+        else:
+            self.system_message = "You are guiding a robot to pick up an object. "
+            self.system_message += "The robot is represented by a green circle with a red line indicating direction. "
+            self.system_message += "The robot can move forward, turn left or right, and pick up the object. "
+            self.system_message += "Your goal is to navigate to the object."
 
     def flatten_state(self, state):
         flattened_state = []
@@ -150,7 +171,9 @@ class Sem8Preprocessing:
                     flattened_state.append(s)
 
         _flatten_state(state)
-        return torch.tensor(flattened_state, dtype=torch.bfloat16)
+        return torch.tensor(
+            flattened_state, dtype=torch.bfloat16, device=self.model.device
+        )
 
     def augment_state(self, state, info):
         image_surface = info["image"]
@@ -169,7 +192,7 @@ class Sem8Preprocessing:
         ]
         inputs = self.model.prepare_message(message)
         # Get the task embedding from the model
-        task_embedding = self.model(inputs).squeeze(0).cpu()
+        task_embedding = self.model(inputs).squeeze(0)
         # print("Task embedding shape:", task_embedding.shape)
         # Concatenate the robot state and task embedding
         state = torch.cat([self.flatten_state(state), task_embedding.flatten()], axis=0)

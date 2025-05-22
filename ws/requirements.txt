@@ -21,3 +21,4 @@ requests==2.32.3
 #:nt
 peft==0.15.2
 gymnasium[mujoco]
+gymnasium[other]

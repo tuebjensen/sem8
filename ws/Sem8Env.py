@@ -14,7 +14,7 @@ from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
 from mazelib import Maze
 
-from create_dataset import generate_image, generate_maze
+from create_dataset import generate_image, generate_maze, generate_simple_image
 
 
 class DiscreteBoxSpace(spaces.Space):
@@ -56,8 +56,17 @@ class Sem8Env(gym.Env):
         self._agent_radius = 15
         self._eval = kwargs.get("eval", False)
         self._eval_data_dir = kwargs.get("eval_data_dir", "")
+        self._use_maze = kwargs.get("use_maze", True)
+        self._use_time_based_penalty = kwargs.get("use_time_based_penalty", True)
+        self._success_reward = kwargs.get("success_reward", 10)
+        self._use_simple_env = kwargs.get("use_simple_env", False)
+        self._colors = kwargs.get("colors", "")
+        self._n_objects = kwargs.get("n_objects", 1)
         self.is_last_eval_data = False
-        self._eval_data_generator = self._load_eval_data(eval_eps=kwargs.get("eval_eps", None))
+        self._eval_data_generator = self._load_eval_data(
+            eval_eps=kwargs.get("eval_eps", None)
+        )
+        print("Kwargs", kwargs)
 
         self.action_space = spaces.Discrete(4)  # Forward, Left, Right, Pick up
         self.observation_space = spaces.Tuple(
@@ -144,7 +153,15 @@ class Sem8Env(gym.Env):
         return surface_with_rects
 
     def _generate_train_data(self):
-        self._image, self._bbox_rects, self._categories = generate_image()
+        if self._use_simple_env:
+            self._image, self._bbox_rects, self._categories = generate_simple_image(
+                self._colors
+            )
+        else:
+            self._image, self._bbox_rects, self._categories = generate_image(
+                self._n_objects
+            )
+
         self._width, self._height = self._image.get_size()
 
         self._target_bbox_index = random.randint(0, len(self._bbox_rects) - 1)
@@ -174,7 +191,7 @@ class Sem8Env(gym.Env):
         )
         self._prompt = f"Your goal is to locate and pick up the {self._categories[self._target_bbox_index]}."
 
-    def _load_eval_data(self, eval_eps: int | None=None):
+    def _load_eval_data(self, eval_eps: int | None = None):
         print("Loading eval data from", self._eval_data_dir)
         with open(os.path.join(self._eval_data_dir, "meta_data.json")) as f:
             eval_meta_data = json.load(f)[:eval_eps]
@@ -218,9 +235,11 @@ class Sem8Env(gym.Env):
         else:
             self._generate_train_data()
         # self._draw_rects(self._image, self._bbox_rects, color=(255, 0, 0), line_width=2)
-        self._image_with_maze = self._draw_rects(
-            self._image, self._maze_rects, color=(0, 255, 0)
-        )
+        self._image_with_maze = self._image.copy()
+        if self._use_maze:
+            self._image_with_maze = self._draw_rects(
+                self._image, self._maze_rects, color=(0, 255, 0)
+            )
         # Sample returns integers, but we want floats for math purposes
         if self.render_mode == "human":
             self._render_frame()
@@ -248,7 +267,7 @@ class Sem8Env(gym.Env):
         return collided, coll_x, coll_y
 
     def step(self, action):
-        reward = -0.01
+        reward = -0.01 if self._use_time_based_penalty else 0
         terminated = False
         if action == 0:
             # Go forward
@@ -260,26 +279,29 @@ class Sem8Env(gym.Env):
             )
 
             # Check for collision with maze
-            maze_collided = True
-            for rect in self._maze_rects:
-                maze_collided, coll_x, coll_y = self._circle_aa_rect_collision(
-                    (new_x, new_y),
-                    self._agent_radius,
-                    rect,
-                )
-                if maze_collided:
-                    # pygame.draw.circle(
-                    #     self._image_with_maze,
-                    #     (0, 0, 255),
-                    #     (coll_x, coll_y),
-                    #     3,
-                    # )
-                    break
+            if self._use_maze:
+                maze_collided = True
+                for rect in self._maze_rects:
+                    maze_collided, coll_x, coll_y = self._circle_aa_rect_collision(
+                        (new_x, new_y),
+                        self._agent_radius,
+                        rect,
+                    )
+                    if maze_collided:
+                        # pygame.draw.circle(
+                        #     self._image_with_maze,
+                        #     (0, 0, 255),
+                        #     (coll_x, coll_y),
+                        #     3,
+                        # )
+                        break
 
-            if not maze_collided:
+                if not maze_collided:
+                    self._agent_position[0] = new_x
+                    self._agent_position[1] = new_y
+            else:
                 self._agent_position[0] = new_x
                 self._agent_position[1] = new_y
-
             self._agent_position[0:2] = np.clip(
                 self._agent_position[0:2],
                 [self._agent_radius, self._agent_radius],
@@ -297,8 +319,8 @@ class Sem8Env(gym.Env):
             )
 
             if correct_pick_up:
-                reward = 10
-                
+                reward = self._success_reward
+
             terminated = correct_pick_up
 
         if self.render_mode == "human":
@@ -370,7 +392,16 @@ gym.register(id="Sem8-v0", entry_point=Sem8Env)
 
 def main():
     env = TimeLimit(
-        gym.make("Sem8-v0", render_mode="human", eval=True, eval_data_dir="test"),
+        gym.make(
+            "Sem8-v0",
+            render_mode="human",
+            eval=False,
+            eval_data_dir="test",
+            use_maze=False,
+            use_simple_env=False,
+            n_objects=7,
+            colors="red,blue",
+        ),
         max_episode_steps=1000,
     )
     for i in range(10):

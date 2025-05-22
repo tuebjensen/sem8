@@ -27,7 +27,7 @@ class Hyperparameters:
 
     # Exploration
     # TODO: change this back!
-    buffer_size_before_training: int = int(1e3)  # 10e3
+    buffer_size_before_training: int = int(10e3)  # 10e3
     exploration_noise: float = 0.2
 
     # TD3
@@ -91,6 +91,8 @@ class Agent:
         device: torch.device,
         history: int = 1,
         hp: Dict = {},
+        use_last_embedding: bool = False,
+        use_hf_model: bool = False,
     ):
         self.name = "MR.Q"
 
@@ -127,6 +129,8 @@ class Agent:
             self.zsa_dim,
             self.enc_hdim,
             self.enc_activ,
+            use_last_embedding=use_last_embedding,
+            use_hf_model=use_hf_model,
         ).to(self.device)
         self.encoder_optimizer = torch.optim.AdamW(
             self.encoder.parameters(), lr=self.enc_lr, weight_decay=self.enc_wd
@@ -396,6 +400,23 @@ class Agent:
             self.__dict__[k] = v
 
         self.replay_buffer.load(save_folder)
+
+    def load_base_model(self, save_folder: str):
+        print("Loading base model from: ", save_folder)
+        models = [
+            "encoder",
+            "policy",
+            "value",
+        ]
+        for k in models:
+            self.__dict__[k].load_state_dict(
+                torch.load(f"{save_folder}/{k}.pt", weights_only=True)
+            )
+
+        # Copy the loaded model to the target model
+        self.encoder_target = copy.deepcopy(self.encoder)
+        self.policy_target = copy.deepcopy(self.policy)
+        self.value_target = copy.deepcopy(self.value)
 
 
 class TwoHot:

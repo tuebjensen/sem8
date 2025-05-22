@@ -58,8 +58,6 @@ def main(args: argparse.Namespace):
         )
         args_for_id = [
             str(datetime.now()),
-            *scmd.opts,
-            module_path,
             *sys.argv[1:],
             *scmd.python_args,
         ]
