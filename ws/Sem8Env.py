@@ -11,7 +11,7 @@ import gymnasium as gym
 import numpy as np
 import pygame
 from gymnasium import spaces
-from gymnasium.wrappers import TimeLimit
+from gymnasium.wrappers import RecordVideo, TimeLimit
 from mazelib import Maze
 
 from create_dataset import generate_image, generate_maze, generate_simple_image
@@ -80,12 +80,7 @@ class Sem8Env(gym.Env):
 
         self.window = None
         self.clock = None
-        self._annotations_path = os.path.join("output", "meta_data.json")
-        with open(self._annotations_path) as f:
-            self._annotation_dict = json.load(f)
-        self._categories_dict = {
-            category["id"]: category for category in self._annotation_dict["categories"]
-        }
+
         self._maze_generator = Maze()
 
     def _get_obs(self):
@@ -96,23 +91,6 @@ class Sem8Env(gym.Env):
 
     def _get_info(self):
         return {"image": self._image, "prompt": self._prompt}
-
-    def _load_random_image_bbox(self):
-        image_object = random.choice(self._annotation_dict["images"])
-        image_file_name = image_object["file_name"]
-        image_dir = os.path.dirname(self._annotations_path)
-        image_path = os.path.join(image_dir, image_file_name)
-        image = pygame.image.load(image_path)
-
-        bboxes = []
-        category_ids = []
-        for bbox_object in image_object["bbox_objects"]:
-            bbox = bbox_object["bbox"]
-            category_id = bbox_object["category_id"]
-            bboxes.append(bbox)
-            category_ids.append(category_id)
-
-        return image, bboxes, category_ids
 
     def _apply_boundary_mask(self, mask: np.ndarray, radius: int):
         mask[0 : radius + 1] = 0
@@ -391,18 +369,22 @@ gym.register(id="Sem8-v0", entry_point=Sem8Env)
 
 
 def main():
-    env = TimeLimit(
-        gym.make(
-            "Sem8-v0",
-            render_mode="human",
-            eval=False,
-            eval_data_dir="test",
-            use_maze=False,
-            use_simple_env=False,
-            n_objects=7,
-            colors="red,blue",
+    env = RecordVideo(
+        TimeLimit(
+            gym.make(
+                "Sem8-v0",
+                render_mode="rgb_array",
+                eval=False,
+                eval_data_dir="validation_data/validation_5_object",
+                use_maze=True,
+                use_simple_env=False,
+                n_objects=5,
+                colors="red,blue",
+            ),
+            max_episode_steps=500,
         ),
-        max_episode_steps=1000,
+        "plots/test_videos",
+        episode_trigger=lambda x: True,
     )
     for i in range(10):
         observation, info = env.reset()
