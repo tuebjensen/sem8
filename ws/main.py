@@ -8,16 +8,19 @@
 import argparse
 import dataclasses
 import json
+import math
 import os
 import pickle
 import time
+from collections import defaultdict
 
 import numpy as np
 import torch
 import torch.nn as nn
 import tqdm
+from PIL import Image
 from safetensors import safe_open
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig, AutoModel, AutoProcessor
 from transformers.feature_extraction_utils import BatchFeature
 
 import original_MRQ.env_preprocessing as env_preprocessing
@@ -27,92 +30,47 @@ import Sem8Env as _
 from eagle2_hg_model.inference_eagle_repo import EagleProcessor
 
 
-class EagleBackbone(nn.Module):
-    def __init__(self, device: torch.device):
-        self.select_layer = 12
-        self.config = AutoConfig.from_pretrained(
-            "eagle2_hg_model", trust_remote_code=True
-        )
-        self.model = AutoModel.from_config(self.config, trust_remote_code=True)
-        self.pooler = nn.AdaptiveAvgPool1d(1).to(device)
-        self.reduce_model()
-        self.load_weights()
-        self.freeze_and_eval()
+class MovingAvg:
+    def __init__(self):
+        self.n = 0
+        self.moving_avg = 0.0
+
+    def add(self, x: float):
+        self.n += 1
+        self.moving_avg += (x - self.moving_avg) / self.n
+
+    def __str__(self) -> str:
+        return f"{self.moving_avg} ({self.n})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+class EagleBackboneHF(nn.Module):
+    def __init__(self, device: torch.device, use_last_embedding: bool = False):
+        super().__init__()
         self.device = device
-        self.model.to(device)
-        self.projector = torch.nn.Linear(2048, 1024).to(device)
-        self.processor = EagleProcessor(
-            model_path="eagle2_hg_model", max_input_tiles=1, model_spec=None
+        self.model = AutoModel.from_pretrained(
+            "nvidia/Eagle2-1B", trust_remote_code=True, torch_dtype=torch.bfloat16
         )
-        self.img_context_token_id = self.processor.get_img_context_token()
-        if (
-            hasattr(self.model, "vision_model")
-            and hasattr(self.model.vision_model, "vision_model")
-            and hasattr(self.model.vision_model.vision_model, "vision_towers")
-            and len(self.model.vision_model.vision_model.vision_towers) > 1
-        ):
-            vision_towers = self.model.vision_model.vision_model.vision_towers
+        self.processor = AutoProcessor.from_pretrained(
+            "nvidia/Eagle2-1B", trust_remote_code=True, use_fast=True
+        )
+        self.processor.tokenizer.padding_side = "left"
+        # Done for optimization purposes
+        self.model.language_model.lm_head = torch.nn.Identity()
+        self.freeze_and_eval()
+        self.img_context_token_id = self.processor.tokenizer.convert_tokens_to_ids(
+            "<IMG_CONTEXT>"
+        )
 
-            if (
-                hasattr(vision_towers[0], "vision_tower")
-                and hasattr(vision_towers[0].vision_tower, "vision_model")
-                and hasattr(vision_towers[0].vision_tower.vision_model, "encoder")
-            ):
-                vision_towers[
-                    0
-                ].vision_tower.vision_model.encoder.gradient_checkpointing = False
-                vision_towers[0].vision_tower.vision_model.head = torch.nn.Identity()
-
-            if hasattr(vision_towers[1], "vision_tower"):
-                vision_towers[1].vision_tower.head = torch.nn.Identity()
-
-    def load_weights(self):
-        backbone_weights = self.get_backbone_weights()
-        for key in backbone_weights.keys():
-            if key in self.model.state_dict():
-                self.model.state_dict()[key].copy_(backbone_weights[key])
-            else:
-                print(f"Key {key} not found in model state dict")
-
-    def get_backbone_weights(self):
-        # For some reason the module parser thing complains if I don't import this here
-        from huggingface_hub import snapshot_download
-
-        path = snapshot_download("nvidia/GR00T-N1-2B", repo_type="model")
-        safe_tensors_path = path + "/model.safetensors"
-        backbone_tensors = {}
-        with safe_open(safe_tensors_path, framework="pt", device="cuda") as f:
-            keys = f.keys()
-            for key in keys:
-                if "backbone.model." in key:
-                    backbone_tensors[key.replace("backbone.model.", "")] = f.get_tensor(
-                        key
-                    )
-
-        return backbone_tensors
+        self.model.to(self.device)
 
     def freeze_and_eval(self):
-        self.model.language_model.requires_grad_(False)
-        self.model.vision_model.requires_grad_(False)
-        self.model.mlp1.requires_grad_(False)
-        self.model.language_model.eval()
-        self.model.vision_model.eval()
-        self.model.mlp1.eval()
+        self.model.requires_grad_(False)
+        self.model.eval()
 
-    def reduce_model(self):
-        self.model.neftune_alpha = None
-
-        # Reduce vision model (Siglip)
-        if hasattr(self.model.vision_model, "vision_model") and hasattr(
-            self.model.vision_model.vision_model, "head"
-        ):
-            self.model.vision_model.vision_model.head = torch.nn.Identity()
-
-        # Remove language modelling head and remove layers
-        self.model.language_model.lm_head = torch.nn.Identity()
-        while len(self.model.language_model.model.layers) > self.select_layer:
-            self.model.language_model.model.layers.pop(-1)
-
+    @torch.no_grad()
     def get_embeddings(
         self,
         reproject_vision: bool,
@@ -123,7 +81,7 @@ class EagleBackbone(nn.Module):
         output_hidden_states=None,
         skip_llm=False,
         img_context_token_id=None,
-    ) -> torch.LongTensor:
+    ) -> torch.Tensor:
         assert pixel_values is not None
         assert img_context_token_id is not None
 
@@ -150,7 +108,211 @@ class EagleBackbone(nn.Module):
             output_hidden_states=True,
         )
         embeddings = embeddings.hidden_states[-1]
+        return embeddings
 
+        # messages = [
+        #     {"role": "system", "content": self.system_message},
+        #     {
+        #         "role": "user",
+        #         "image": [{"np_array": image}],
+        #         "content": prompt,
+        #     },
+        # ]
+
+    #     messages = [
+    #     {
+    #         "role": "user",
+    #         "content": [
+    #             {
+    #                 "type": "image",
+    #                 "image": "https://www.ilankelman.org/stopsigns/australia.jpg",
+    #             },
+    #             {
+    #                 "type": "text",
+    #                 "text": "Translate and write out what all the signs in the image say.",
+    #             },
+    #         ],
+    #     }
+    # ]
+    def prepare_message(self, messages: list):
+        # Convert from the format GR00T uses to the format that EAGLE2 from HF uses
+        # print("Messages: ", messages)
+        converted_messages = []
+        converted_messages.append(messages[0])  # System message
+        new_user_message = {"role": "user", "content": []}
+        image = Image.fromarray(messages[1]["image"][0]["np_array"])
+        new_user_message["content"].append({"type": "image", "image": image})
+        new_user_message["content"].append(
+            {"type": "text", "text": messages[1]["content"]}
+        )
+        converted_messages.append(new_user_message)
+
+        # print("Messages after image conversion: ", converted_messages)
+        text_list = [
+            self.processor.apply_chat_template(
+                converted_messages, tokenize=False, add_generation_prompt=False
+            )
+        ]
+        # print("Text list: ", text_list)
+        image_inputs, _ = self.processor.process_vision_info(converted_messages)
+        # print("Image_inputs: ", image_inputs)
+        inputs = self.processor(
+            text=text_list, images=image_inputs, return_tensors="pt", padding=False
+        )
+        # print("Inputs: ", inputs)
+        return BatchFeature(inputs).to(self.device)
+
+    @torch.no_grad()
+    def forward(self, inputs: BatchFeature):
+        embeddings = self.get_embeddings(
+            reproject_vision=False,
+            pixel_values=inputs["pixel_values"],
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            img_context_token_id=self.img_context_token_id,
+        )
+        # print(embeddings.shape)
+        return embeddings[:, -1, :]
+
+
+class EagleBackbone(nn.Module):
+    def __init__(self, device: torch.device, use_last_embedding: bool = False):
+        super().__init__()
+        self.use_last_embedding = use_last_embedding
+        self.select_layer = 12
+        self.config = AutoConfig.from_pretrained(
+            "eagle2_hg_model", trust_remote_code=True
+        )
+        self.device = device
+        self.model = AutoModel.from_config(self.config, trust_remote_code=True)
+        self.linear = torch.nn.Linear(2048, 1536, dtype=torch.bfloat16)
+        self.reduce_model()
+        self.load_weights()
+        self.freeze_and_eval()
+        self.model.to(device)
+        self.linear.to(device)
+        self.pooler = nn.AdaptiveAvgPool1d(10)
+        self.processor = EagleProcessor(model_path="eagle2_hg_model")
+        self.img_context_token_id = self.processor.get_img_context_token()
+        self.remove_vision_tower_heads()
+
+    def load_weights(self):
+        backbone_weights = self.get_backbone_weights()
+        for key in backbone_weights.keys():
+            w = backbone_weights[key]
+            if key.startswith("model."):
+                k = key.removeprefix("model.")
+                if k in self.model.state_dict():
+                    self.model.state_dict()[k].copy_(w)
+                else:
+                    print(f"Key {key} not found in model state dict")
+            elif key.startswith("linear."):
+                k = key.removeprefix("linear.")
+                if k in self.linear.state_dict():
+                    self.linear.state_dict()[k].copy_(w)
+                else:
+                    print(f"Key {key} not found in linear state dict")
+
+    def get_backbone_weights(self):
+        # For some reason the module parser thing complains if I don't import this here
+        from huggingface_hub import snapshot_download
+
+        path = snapshot_download("nvidia/GR00T-N1-2B", repo_type="model")
+        safe_tensors_path = path + "/model.safetensors"
+        backbone_tensors: dict[str, torch.Tensor] = {}
+        with safe_open(safe_tensors_path, framework="pt", device="cuda") as f:
+            keys = f.keys()
+            for key in keys:
+                # type safety
+                assert isinstance(key, str)
+                if "backbone." in key:
+                    backbone_tensors[key.removeprefix("backbone.")] = f.get_tensor(key)
+
+        return backbone_tensors
+
+    def freeze_and_eval(self):
+        self.model.language_model.requires_grad_(False)
+        self.model.vision_model.requires_grad_(False)
+        self.model.mlp1.requires_grad_(False)
+        self.linear.requires_grad_(False)
+
+        self.model.language_model.eval()
+        self.model.vision_model.eval()
+        self.model.mlp1.eval()
+        self.linear.eval()
+
+    def reduce_model(self):
+        self.model.neftune_alpha = None
+
+        # Reduce vision model (Siglip)
+        if hasattr(self.model.vision_model, "vision_model") and hasattr(
+            self.model.vision_model.vision_model, "head"
+        ):
+            self.model.vision_model.vision_model.head = torch.nn.Identity()
+
+        # Remove language modelling head and remove layers
+        self.model.language_model.lm_head = torch.nn.Identity()
+        while len(self.model.language_model.model.layers) > self.select_layer:
+            self.model.language_model.model.layers.pop(-1)
+
+    def remove_vision_tower_heads(self):
+        if (
+            hasattr(self.model, "vision_model")
+            and hasattr(self.model.vision_model, "vision_model")
+            and hasattr(self.model.vision_model.vision_model, "vision_towers")
+            and len(self.model.vision_model.vision_model.vision_towers) > 1
+        ):
+            vision_towers = self.model.vision_model.vision_model.vision_towers
+
+            if (
+                hasattr(vision_towers[0], "vision_tower")
+                and hasattr(vision_towers[0].vision_tower, "vision_model")
+                and hasattr(vision_towers[0].vision_tower.vision_model, "encoder")
+            ):
+                vision_towers[
+                    0
+                ].vision_tower.vision_model.encoder.gradient_checkpointing = False
+                vision_towers[0].vision_tower.vision_model.head = torch.nn.Identity()
+
+            if hasattr(vision_towers[1], "vision_tower"):
+                vision_towers[1].vision_tower.head = torch.nn.Identity()
+
+    def get_embeddings(
+        self,
+        pixel_values=None,
+        input_ids=None,
+        attention_mask=None,
+        visual_features=None,
+        output_hidden_states=None,
+        skip_llm=False,
+        img_context_token_id=None,
+    ) -> torch.Tensor:
+        assert pixel_values is not None
+        assert img_context_token_id is not None
+
+        vit_embeds = self.model.extract_feature(pixel_values)
+
+        input_embeds = self.model.language_model.get_input_embeddings()(input_ids)
+        B, N, C = input_embeds.shape
+        input_embeds = input_embeds.reshape(B * N, C)
+
+        input_ids = input_ids.reshape(B * N)
+        selected = input_ids == img_context_token_id
+        assert selected.sum() != 0
+
+        embeds_to_scatter = vit_embeds.reshape(-1, C).to(
+            input_embeds.device, input_embeds.dtype
+        )
+        input_embeds[selected] = embeds_to_scatter
+        input_embeds = input_embeds.reshape(B, N, C)
+
+        # return hidden_states
+        embeddings = self.model.language_model.forward(
+            inputs_embeds=input_embeds,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+        embeddings = embeddings.hidden_states[-1]
         return embeddings
 
     def prepare_message(self, message: list):
@@ -160,19 +322,19 @@ class EagleBackbone(nn.Module):
 
     def forward(self, inputs: BatchFeature):
         embeddings = self.get_embeddings(
-            reproject_vision=False,
             pixel_values=inputs["pixel_values"],
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
             img_context_token_id=self.img_context_token_id,
         )
-        embeddings = self.projector(embeddings)
-        # Note: pooling was not done originally in GR00T since they use cross-attention.
-        # However, we plan to use it as input to an MLP so we need to reduce the sequence dimension in some way
-        # Embeddings have shape (B, N, C) but the pooler requires (B, C, N)
-        # Squeeze the sequence dimension to get (B, C)
-        embeddings = self.pooler(embeddings.transpose(-1, -2)).squeeze(-1)
-        return embeddings
+        embeddings = self.linear(embeddings)
+        if self.use_last_embedding:
+            return embeddings[:, -1, :]
+
+        pooled_embeddings = self.pooler(
+            embeddings[:, :-10, :].transpose(1, 2)
+        ).transpose(1, 2)
+        return torch.cat([pooled_embeddings, embeddings[:, -10:, :]], dim=1)
 
 
 @dataclasses.dataclass
@@ -190,7 +352,7 @@ class DefaultExperimentArguments:
     Frozen_eval_freq: int = 5e3
 
     Sem8_total_timesteps: int = 1e6  # 1e6
-    Sem8_eval_freq: int = 5e2  # 5e3
+    Sem8_eval_freq: int = 5e4  # 5e3
 
     def __post_init__(self):
         utils.enforce_dataclass_type(self)
@@ -228,30 +390,51 @@ def main(args):
         eval_eps = args.eval_eps
         eval_data_folder_path = ""
         remove_info = True
-        model = None  # EagleBackbone(device)
+        model = None
         if args.eval_data_folder != "":
             eval_data_folder_path = os.path.abspath(args.eval_data_folder)
             # Make sure that data directory exists
             assert os.path.exists(eval_data_folder_path), "eval_data_dir does not exist"
             with open(os.path.join(eval_data_folder_path, "meta_data.json"), "r") as f:
                 meta_data = json.load(f)
-            eval_eps = len(meta_data)
+            eval_eps = min(len(meta_data), eval_eps)
+            if args.use_hf_model:
+                model = EagleBackboneHF(device, args.use_last_embedding)
+            else:
+                model = EagleBackbone(device, args.use_last_embedding)
 
         env = env_preprocessing.Env(
             args.env,
             args.seed,
             eval_env=False,
+            use_maze=args.use_maze,
+            use_last_embedding=args.use_last_embedding,
             eval_data_dir=eval_data_folder_path,
+            use_time_based_penalty=args.use_time_based_penalty,
+            use_simple_env=args.use_simple_env,
+            use_hf_model=args.use_hf_model,
+            success_reward=args.success_reward,
             remove_info=remove_info,
             model=model,
+            colors=args.colors,
+            n_objects=args.n_objects,
         )
         eval_env = env_preprocessing.Env(
             args.env,
             args.seed + 100,
+            eval_eps=eval_eps,
             eval_env=True,
+            use_maze=args.use_maze,
+            use_last_embedding=args.use_last_embedding,
+            use_time_based_penalty=args.use_time_based_penalty,
+            success_reward=args.success_reward,
+            use_simple_env=args.use_simple_env,
+            use_hf_model=args.use_hf_model,
             eval_data_dir=eval_data_folder_path,
             remove_info=remove_info,
             model=model,
+            colors=args.colors,
+            n_objects=args.n_objects,
         )  # +100 to make sure the seed is different.
 
         agent = MRQ.Agent(
@@ -262,7 +445,12 @@ def main(args):
             env.discrete,
             device,
             env.history,
+            use_last_embedding=args.use_last_embedding,
+            use_hf_model=args.use_hf_model,
         )
+
+        if args.use_base_model:
+            agent.load_base_model(f"{args.save_folder}/{args.base_project_name}")
 
         logger = utils.Logger(f"{args.log_folder}/{args.project_name}.txt")
 
@@ -320,8 +508,9 @@ class OnlineExperiment:
         eval_folder: str,
         project_name: str,
         save_full: bool = False,
-        save_freq: int = 1e5,
+        save_freq: int = 1e3,
         save_folder: str = "",
+        timings: defaultdict[str, MovingAvg] | None = None,
     ):
         self.agent = agent
         self.env = env
@@ -329,7 +518,6 @@ class OnlineExperiment:
         self.evals = evals
 
         self.logger = logger
-
         self.t = t
         self.time_passed = time_passed
         self.start_time = time.time()
@@ -346,46 +534,58 @@ class OnlineExperiment:
 
         self.init_timestep = True
 
+        self.timings = defaultdict(MovingAvg) if timings is None else timings
+
     def run(self):
+        t = time.time()
         state = self.env.reset()
-        times = []
+        self.timings["reset"].add(time.time() - t)
+
         while self.t <= self.total_timesteps:
-            # self.maybe_evaluate()
+            self.maybe_evaluate()
+
             if (
                 self.save_full
                 and self.t % self.save_freq == 0
                 and not self.init_timestep
             ):
+                t = time.time()
                 save_experiment(self)
-            if self.t % 1000 == 0:
-                if len(times) > 0:
-                    print(sum(times) / len(times))
-                times = []
-            time_start = time.perf_counter()
+                self.timings["save"].add(time.time() - t)
+
+            t = time.time()
             action = self.agent.select_action(state)
             if action is None:
                 action = self.env.action_space.sample()
+            else:
+                self.timings["select_action"].add(time.time() - t)
 
+            t = time.time()
             next_state, reward, terminated, truncated = self.env.step(action)
             self.agent.replay_buffer.add(
                 state, action, next_state, reward, terminated, truncated
             )
             state = next_state
+            self.timings["step"].add(time.time() - t)
 
+            t = time.time()
             self.agent.train()
+            self.timings["train"].add(time.time() - t)
 
             if terminated or truncated:
                 self.logger.log_print(
                     f"Total T: {self.t + 1}, "
                     f"Episode Num: {self.env.ep_num}, "
                     f"Episode T: {self.env.ep_timesteps}, "
-                    f"Reward: {self.env.ep_total_reward:.3f}"
+                    f"Reward: {self.env.ep_total_reward:.3f}, "
+                    f"Timings: {dict(self.timings)}"
                 )
+                t = time.time()
                 state = self.env.reset()
+                self.timings["reset"].add(time.time() - t)
 
             self.t += 1
             self.init_timestep = False
-            times.append(time.perf_counter() - time_start)
 
     def maybe_evaluate(self):
         if self.t % self.eval_freq != 0:
@@ -394,15 +594,23 @@ class OnlineExperiment:
         # We save after evaluating, this avoids re-evaluating immediately after loading an experiment.
         if self.t != 0 and self.init_timestep:
             return
-        print("Evaluating")
         total_reward = np.zeros(self.eval_eps)
         for ep in tqdm.tqdm(range(self.eval_eps)):
+            print("Evaluating episode", ep + 1)
+
+            t = time.time()
             state, terminated, truncated = self.eval_env.reset(), False, False
+            self.timings["eval_reset"].add(time.time() - t)
+
             while not (terminated or truncated):
-                action = self.agent.select_action(
-                    np.array(state), use_exploration=False
-                )
+                t = time.time()
+                action = self.agent.select_action(state, use_exploration=False)
+                self.timings["eval_select_action"].add(time.time() - t)
+
+                t = time.time()
                 state, _, terminated, truncated = self.eval_env.step(action)
+                self.timings["eval_step"].add(time.time() - t)
+
             total_reward[ep] = self.eval_env.ep_total_reward
 
         self.evals.append(total_reward.mean())
@@ -410,12 +618,15 @@ class OnlineExperiment:
         self.logger.title(
             f"Evaluation at {self.t} time steps\n"
             f"Average total reward over {self.eval_eps} episodes: {total_reward.mean():.3f}\n"
-            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes"
+            f"Total time passed: {round((time.time() - self.start_time + self.time_passed) / 60.0, 2)} minutes\n"
+            f"Timings: {dict(self.timings)}",
         )
 
+        t = time.time()
         np.savetxt(
             f"{self.eval_folder}/{self.project_name}.txt", self.evals, fmt="%.14f"
         )
+        self.timings["eval_save"].add(time.time() - t)
 
 
 def save_experiment(exp: OnlineExperiment):
@@ -425,17 +636,18 @@ def save_experiment(exp: OnlineExperiment):
     var_dict["time_passed"] = exp.time_passed + time.time() - exp.start_time
     var_dict["np_seed"] = np.random.get_state()
     var_dict["torch_seed"] = torch.get_rng_state()
+    var_dict["timings"] = exp.timings
     np.save(f"{exp.save_folder}/{exp.project_name}/exp_var.npy", var_dict)
     # Save eval
     np.savetxt(f"{exp.save_folder}/{exp.project_name}.txt", exp.evals, fmt="%.14f")
     # Save envs
-    pickle.dump(
-        exp.env, file=open(f"{exp.save_folder}/{exp.project_name}/env.pickle", "wb")
-    )
-    pickle.dump(
-        exp.eval_env,
-        file=open(f"{exp.save_folder}/{exp.project_name}/eval_env.pickle", "wb"),
-    )
+    # pickle.dump(
+    #     exp.env, file=open(f"{exp.save_folder}/{exp.project_name}/env.pickle", "wb")
+    # )
+    # pickle.dump(
+    #     exp.eval_env,
+    #     file=open(f"{exp.save_folder}/{exp.project_name}/eval_env.pickle", "wb"),
+    # )
     # Save agent
     exp.agent.save(f"{exp.save_folder}/{exp.project_name}")
 
@@ -493,12 +705,42 @@ def load_experiment(
         args.save_experiment,
         args.save_freq,
         args.save_folder,
+        timings=exp_dict["timings"],
     )
 
 
 def modify_parser(parser):
     # Experiment
     parser.add_argument("--env", default="Gym-HalfCheetah-v4", type=str)
+    parser.add_argument("--use_maze", default=False, action="store_true")
+    parser.add_argument("--use_last_embedding", default=False, action="store_true")
+    parser.add_argument("--use_time_based_penalty", default=False, action="store_true")
+    parser.add_argument("--use_hf_model", default=False, action="store_true")
+    parser.add_argument("--use_simple_env", default=False, action="store_true")
+    parser.add_argument(
+        "--use_base_model",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--base_project_name",
+        default="base_simple_gr00t",
+        type=str,
+    )
+    parser.add_argument("--success_reward", default=10.0, type=float)
+    parser.add_argument(
+        "--colors",
+        type=str,
+        default="red,blue",
+        help="Comma separated list of colors for simple env. It will put one rectangle of each color on the image.",
+    )
+    parser.add_argument(
+        "--n_objects",
+        type=int,
+        default=7,
+        help="Number of objects to place in the image if not using simple env.",
+    )
+
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument(
         "--total_timesteps", default=-1, type=int

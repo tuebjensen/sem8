@@ -1,7 +1,9 @@
 import argparse
 import os
+import re
 import subprocess
 import sys
+from datetime import datetime
 from importlib.util import find_spec
 
 from ail_fe_main_scmds import SCmd
@@ -34,21 +36,47 @@ def main(args: argparse.Namespace):
         if module_path is None:
             raise ImportError(f"Module {args.f} not found (origin)")
 
-        command = [
-            "srun",
-            *scmd.opts,
-            "singularity",
-            "exec",
-            "--nv",
-            "/ceph/container/pytorch/pytorch_24.09.sif",
-            "bash",
-            "ail_slurm_main.sh",
-            module_path,
+        command = " ".join(
+            [
+                arg if i == 0 else "'" + arg.replace("'", "'\"'\"'") + "'"
+                for (i, arg) in enumerate(
+                    [
+                        "srun",
+                        *scmd.opts,
+                        "singularity",
+                        "exec",
+                        "--nv",
+                        "/ceph/container/pytorch/pytorch_24.09.sif",
+                        "bash",
+                        "ail_slurm_main.sh",
+                        module_path,
+                        *sys.argv[1:],
+                        *scmd.python_args,
+                    ]
+                )
+            ]
+        )
+        args_for_id = [
+            str(datetime.now()),
             *sys.argv[1:],
             *scmd.python_args,
         ]
+        id = (
+            "'"
+            + "-".join(args_for_id)
+            .replace("'", "-")
+            .replace("/", "-")
+            .replace(" ", "-")
+            + "'"
+        )
+        id = re.sub(r"-+", "-", id)
+        # id = ""
         print("Running command", command)
-        subprocess.Popen(command)
+        subprocess.run(
+            command + " 2>&1 | tee output-" + id + ".log",
+            shell=True,
+            check=True,
+        )
 
 
 if __name__ == "__main__":

@@ -54,8 +54,14 @@ class Encoder(nn.Module):
         zsa_dim: int = 512,
         hdim: int = 512,
         activ: str = "elu",
+        use_last_embedding: bool = False,
+        use_hf_model: bool = False,
     ):
         super().__init__()
+        self.eagle_seq_len = 1 if use_last_embedding else 20
+        self.eagle_hidden_dim = 896 if use_hf_model else 1536
+        self.eagle_state_dim = 512
+        self.robot_state_dim = 3
         if pixel_obs:
             self.zs = self.cnn_zs
             self.zs_cnn1 = nn.Conv2d(state_dim, 32, 3, stride=2)
@@ -65,12 +71,15 @@ class Encoder(nn.Module):
             self.zs_lin = nn.Linear(1568, zs_dim)
         else:
             self.zs = self.mlp_zs
-            self.zs_mlp = BaseMLP(state_dim, zs_dim, hdim, activ)
+            self.zs_mlp = BaseMLP(
+                self.robot_state_dim + self.eagle_state_dim, zs_dim, hdim, activ
+            )
 
         self.za = nn.Linear(action_dim, za_dim)
         self.zsa = BaseMLP(zs_dim + za_dim, zsa_dim, hdim, activ)
         self.model = nn.Linear(zsa_dim, num_bins + zs_dim + 1)
-
+        self.linear = nn.Linear(self.eagle_hidden_dim, self.eagle_state_dim)
+        self.pooler = nn.AdaptiveAvgPool1d(1)
         self.zs_dim = zs_dim
 
         self.activ = getattr(F, activ)
@@ -98,7 +107,20 @@ class Encoder(nn.Module):
         return ln_activ(self.zs_lin(zs), self.activ)
 
     def mlp_zs(self, state: torch.Tensor):
-        return ln_activ(self.zs_mlp(state), self.activ)
+        # state.shape = (B, 3+20*1536)
+        # robot_state.shape = (B, 3)
+        robot_state = state[:, : self.robot_state_dim]
+        # task_embedding.shape = (B, 20*1536)
+        task_embedding = state[:, self.robot_state_dim :]
+        # task_embedding.shape(B, 20, 1536)
+        task_embedding = self.linear(
+            task_embedding.reshape(-1, self.eagle_seq_len, self.eagle_hidden_dim)
+        )
+        # task_embedding.shape(B, 20, 1024) -> (B, 1024, 20) -> (B, 1024, 1) -> (B, 1024)
+        task_embedding = self.pooler(task_embedding.transpose(1, 2)).squeeze(-1)
+        # combined_state.shape = (B, 3+1024)
+        combined_state = torch.cat([robot_state, task_embedding], dim=1)
+        return ln_activ(self.zs_mlp(combined_state), self.activ)
 
 
 class Policy(nn.Module):

@@ -20,12 +20,13 @@ from . import buffer, models, utils
 @dataclasses.dataclass
 class Hyperparameters:
     # Generic
-    batch_size: int = 256
-    buffer_size: int = int(1e6)  # 1e6
+    batch_size: int = 256  # 256
+    buffer_size: int = int(1e5)  # 1e6
     discount: float = 0.99
     target_update_freq: int = 250
 
     # Exploration
+    # TODO: change this back!
     buffer_size_before_training: int = int(10e3)  # 10e3
     exploration_noise: float = 0.2
 
@@ -90,6 +91,8 @@ class Agent:
         device: torch.device,
         history: int = 1,
         hp: Dict = {},
+        use_last_embedding: bool = False,
+        use_hf_model: bool = False,
     ):
         self.name = "MR.Q"
 
@@ -126,6 +129,8 @@ class Agent:
             self.zsa_dim,
             self.enc_hdim,
             self.enc_activ,
+            use_last_embedding=use_last_embedding,
+            use_hf_model=use_hf_model,
         ).to(self.device)
         self.encoder_optimizer = torch.optim.AdamW(
             self.encoder.parameters(), lr=self.enc_lr, weight_decay=self.enc_wd
@@ -169,7 +174,9 @@ class Agent:
         self.reward_scale, self.target_reward_scale = 1, 0
         self.training_steps = 0
 
-    def select_action(self, state: np.array, use_exploration: bool = True):
+    def select_action(
+        self, state: np.ndarray | torch.Tensor, use_exploration: bool = True
+    ):
         if (
             self.replay_buffer.size < self.buffer_size_before_training
             and use_exploration
@@ -177,9 +184,14 @@ class Agent:
             return None  # Sample random action from environment instead.
 
         with torch.no_grad():
-            state = torch.tensor(state, dtype=torch.float, device=self.device).reshape(
-                -1, *self.state_shape
-            )
+            if isinstance(state, torch.Tensor):
+                state = (
+                    state.reshape(-1, *self.state_shape).to(self.device).to(torch.float)
+                )
+            else:
+                state = torch.tensor(
+                    state, dtype=torch.float, device=self.device
+                ).reshape(-1, *self.state_shape)
             zs = self.encoder.zs(state)
             action = self.policy.act(zs)
             if use_exploration:
@@ -388,6 +400,23 @@ class Agent:
             self.__dict__[k] = v
 
         self.replay_buffer.load(save_folder)
+
+    def load_base_model(self, save_folder: str):
+        print("Loading base model from: ", save_folder)
+        models = [
+            "encoder",
+            "policy",
+            "value",
+        ]
+        for k in models:
+            self.__dict__[k].load_state_dict(
+                torch.load(f"{save_folder}/{k}.pt", weights_only=True)
+            )
+
+        # Copy the loaded model to the target model
+        self.encoder_target = copy.deepcopy(self.encoder)
+        self.policy_target = copy.deepcopy(self.policy)
+        self.value_target = copy.deepcopy(self.value)
 
 
 class TwoHot:

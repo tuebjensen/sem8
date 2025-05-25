@@ -15,9 +15,10 @@ tqdm==4.67.1
 transformers==4.51.3
 requests==2.32.3
 #:PIL
-#:hugginface_hub
+#:huggingface_hub
 #:safetensors
 #:_winapi
 #:nt
 peft==0.15.2
 gymnasium[mujoco]
+gymnasium[other]
