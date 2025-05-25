@@ -116,9 +116,9 @@ class Encoder(nn.Module):
         task_embedding = self.linear(
             task_embedding.reshape(-1, self.eagle_seq_len, self.eagle_hidden_dim)
         )
-        # task_embedding.shape(B, 20, 1024) -> (B, 1024, 20) -> (B, 1024, 1) -> (B, 1024)
+        # task_embedding.shape(B, 20, 512) -> (B, 512, 20) -> (B, 512, 1) -> (B, 512)
         task_embedding = self.pooler(task_embedding.transpose(1, 2)).squeeze(-1)
-        # combined_state.shape = (B, 3+1024)
+        # combined_state.shape = (B, 3+512)
         combined_state = torch.cat([robot_state, task_embedding], dim=1)
         return ln_activ(self.zs_mlp(combined_state), self.activ)
 

@@ -282,9 +282,6 @@ class EagleBackbone(nn.Module):
         pixel_values=None,
         input_ids=None,
         attention_mask=None,
-        visual_features=None,
-        output_hidden_states=None,
-        skip_llm=False,
         img_context_token_id=None,
     ) -> torch.Tensor:
         assert pixel_values is not None
@@ -595,7 +592,7 @@ class OnlineExperiment:
         if self.t != 0 and self.init_timestep:
             return
         total_reward = np.zeros(self.eval_eps)
-        for ep in tqdm.tqdm(range(self.eval_eps)):
+        for ep in range(self.eval_eps):
             print("Evaluating episode", ep + 1)
 
             t = time.time()

@@ -146,7 +146,7 @@ class Sem8Preprocessing:
                 "You are guiding a robot to pick up an object in a maze. "
             )
             self.system_message += (
-                "The robot the green circle with a red line indicating direction. "
+                "The robot is the green circle with a red line indicating direction. "
             )
             self.system_message += "The maze is represented by green lines. "
             self.system_message += "The robot can move forward, turn left or right, and pick up the object. "
